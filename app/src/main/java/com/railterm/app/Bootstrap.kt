@@ -17,30 +17,30 @@ import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 
 /**
- * Installs the Alpine userland: download (sha256-pinned) -> extract -> configure.
+ * Installs a Linux userland: download (sha256-pinned) -> extract -> configure.
  * Idempotent and self-cleaning; a failed install wipes the partial rootfs so the
  * next attempt starts clean.
  */
 object Bootstrap {
 
-    suspend fun install(context: Context, onStatus: (String) -> Unit): Result<Unit> =
+    suspend fun install(context: Context, distro: Distro, onStatus: (String) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
-            val abi = Userland.supportedAbi()
+            val abi = Userland.supportedAbi(distro)
                 ?: return@withContext Result.failure(
-                    IllegalStateException("No Linux build for this CPU (${Build.SUPPORTED_ABIS.joinToString()}).")
+                    IllegalStateException("No ${distro.label} build for this CPU (${Build.SUPPORTED_ABIS.joinToString()}).")
                 )
             if (!Userland.prootBin(context).exists()) {
                 return@withContext Result.failure(IllegalStateException("proot binary missing for $abi."))
             }
-            val rf = Userland.rootfsFor(abi)!!
-            val root = Userland.rootfsDir(context)
+            val rf = Userland.rootfsFor(distro, abi)!!
+            val root = Userland.rootfsDir(context, distro)
             try {
                 if (root.exists()) root.deleteRecursively()
                 root.mkdirs()
 
-                val tarFile = File(context.cacheDir, "alpine-rootfs.tar.gz")
-                onStatus("Downloading Alpine Linux ($abi)…")
-                val sha = download(rf.url, tarFile) { pct -> onStatus("Downloading Alpine Linux… $pct%") }
+                val tarFile = File(context.cacheDir, "${distro.id}-rootfs.tar.gz")
+                onStatus("Downloading ${distro.label} ($abi)…")
+                val sha = download(rf.url, tarFile) { pct -> onStatus("Downloading ${distro.label}… $pct%") }
                 if (!sha.equals(rf.sha256, ignoreCase = true)) {
                     return@withContext Result.failure(
                         IllegalStateException("Download corrupted (checksum mismatch). Try again.")
@@ -52,9 +52,10 @@ object Bootstrap {
                 tarFile.delete()
 
                 onStatus("Configuring…")
-                configure(root)
+                configure(root, distro)
 
-                Userland.installedMarker(context).writeText("alpine ${Userland.ALPINE_VERSION}\n")
+                val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
+                Userland.installedMarker(context, distro).writeText("${distro.id} $version\n")
                 Result.success(Unit)
             } catch (t: Throwable) {
                 runCatching { root.deleteRecursively() }
@@ -137,22 +138,39 @@ object Bootstrap {
     }
 
     /** Minimal working network + package config inside the guest. */
-    private fun configure(root: File) {
+    private fun configure(root: File, distro: Distro) {
         File(root, "etc").mkdirs()
         // Google DNS (we deliberately avoid Cloudflare on the GHT stack).
         File(root, "etc/resolv.conf").writeText("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
         File(root, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost\n")
-        File(root, "etc/apk").mkdirs()
-        File(root, "etc/apk/repositories").writeText(
-            "https://dl-cdn.alpinelinux.org/alpine/v3.20/main\n" +
-                "https://dl-cdn.alpinelinux.org/alpine/v3.20/community\n"
-        )
-        // A clean prompt + welcome for interactive login shells.
         File(root, "etc/profile.d").mkdirs()
-        File(root, "etc/profile.d/00-railterm.sh").writeText(
-            "export PS1='alpine:\\w\\$ '\n" +
-                "alias ll='ls -la'\n" +
-                "[ -f /etc/railterm-welcomed ] || { echo 'Alpine Linux on Railterm. Try: apk add python3 git'; touch /etc/railterm-welcomed; }\n"
-        )
+
+        when (distro) {
+            Distro.Alpine -> {
+                File(root, "etc/apk").mkdirs()
+                File(root, "etc/apk/repositories").writeText(
+                    "https://dl-cdn.alpinelinux.org/alpine/v3.20/main\n" +
+                        "https://dl-cdn.alpinelinux.org/alpine/v3.20/community\n"
+                )
+                // A clean prompt + welcome for interactive login shells.
+                File(root, "etc/profile.d/00-railterm.sh").writeText(
+                    "export PS1='alpine:\\w\\$ '\n" +
+                        "alias ll='ls -la'\n" +
+                        "[ -f /etc/railterm-welcomed ] || { echo 'Alpine Linux on Railterm. Try: apk add python3 git'; touch /etc/railterm-welcomed; }\n"
+                )
+            }
+
+            Distro.Ubuntu -> {
+                // The official ubuntu-base tarball already ships a working
+                // /etc/apt/sources.list (archive.ubuntu.com / ports.ubuntu.com,
+                // picked correctly per architecture) — left untouched rather
+                // than guessing at a mirror URL ourselves.
+                File(root, "etc/profile.d/00-railterm.sh").writeText(
+                    "export PS1='ubuntu:\\w\\$ '\n" +
+                        "alias ll='ls -la'\n" +
+                        "[ -f /etc/railterm-welcomed ] || { echo 'Ubuntu on Railterm. Try: apt update && apt install -y python3 git'; touch /etc/railterm-welcomed; }\n"
+                )
+            }
+        }
     }
 }

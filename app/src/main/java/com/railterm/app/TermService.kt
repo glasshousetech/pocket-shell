@@ -63,7 +63,7 @@ class TermService : Service() {
 
     fun newSession(mode: SessionMode): TermSession {
         val id = nextId++
-        val prefix = if (mode == SessionMode.ALPINE) "linux" else "sh"
+        val prefix = if (mode == SessionMode.LINUX) "linux" else "sh"
         val label = mutableStateOf("$prefix $id")
         val alive = mutableStateOf(true)
         val session = TermCore.newSession(

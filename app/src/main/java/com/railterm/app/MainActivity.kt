@@ -19,8 +19,10 @@ import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.res.ResourcesCompat
 import com.railterm.app.ui.*
+import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +117,11 @@ private fun RailtermApp(service: TermService) {
         runCatching { ResourcesCompat.getFont(ctx, R.font.jbm_regular) }.getOrNull() ?: Typeface.MONOSPACE
     }
 
+    // Load the persisted terminal color theme before any session/emulator is
+    // created, so the very first session already renders with it.
+    var currentThemeId by remember { mutableStateOf(TermThemes.saved(ctx).id) }
+    remember { TerminalColors.COLOR_SCHEME.updateWith(TermThemes.byId(currentThemeId).toProperties()) }
+
     // Sessions live in the foreground service (survive backgrounding).
     val sessions = service.sessions
     var activeIndex by remember { mutableIntStateOf(0) }
@@ -125,6 +133,9 @@ private fun RailtermApp(service: TermService) {
     val scope = rememberCoroutineScope()
     var setupStatus by remember { mutableStateOf<String?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
+    var distroPickerOpen by remember { mutableStateOf(false) }
+    var linuxManageOpen by remember { mutableStateOf(false) }
+    var themeOpen by remember { mutableStateOf(false) }
 
     // AI copilot state
     var copilotOpen by remember { mutableStateOf(false) }
@@ -161,20 +172,43 @@ private fun RailtermApp(service: TermService) {
         }
     }
 
-    // First tap on Linux installs the Alpine userland (once), then opens a session.
+    // First tap on Linux, when nothing is installed yet, opens the distro
+    // picker; afterwards it just opens a session in whatever's installed.
+    // Long-pressing the tab (see TabRail) opens the manage/uninstall dialog.
     fun addLinux() {
-        if (Userland.isInstalled(ctx)) { addSession(SessionMode.ALPINE); return }
-        if (!Userland.isAvailable(ctx)) { setupError = "Linux isn't available for this device's CPU."; return }
+        val installed = Userland.installedDistro(ctx)
+        if (installed != null) { addSession(SessionMode.LINUX); return }
+        distroPickerOpen = true
+    }
+
+    fun installDistro(distro: Distro) {
+        distroPickerOpen = false
+        if (!Userland.isAvailable(ctx, distro)) {
+            setupError = "${distro.label} isn't available for this device's CPU."
+            return
+        }
         setupError = null
-        setupStatus = "Preparing Alpine Linux…"
+        setupStatus = "Preparing ${distro.label}…"
         scope.launch {
-            val result = Bootstrap.install(ctx) { msg ->
+            val result = Bootstrap.install(ctx, distro) { msg ->
                 scope.launch(Dispatchers.Main) { setupStatus = msg }
             }
             setupStatus = null
-            result.onSuccess { addSession(SessionMode.ALPINE) }
+            result.onSuccess { addSession(SessionMode.LINUX) }
                 .onFailure { setupError = it.message ?: "Install failed." }
         }
+    }
+
+    fun uninstallLinux() {
+        Userland.uninstall(ctx)
+        linuxManageOpen = false
+    }
+
+    fun setTheme(theme: TermTheme) {
+        TermThemes.apply(theme, sessions.map { it.session }) { termViewRef.value?.onScreenUpdated() }
+        TermThemes.save(ctx, theme)
+        currentThemeId = theme.id
+        themeOpen = false
     }
 
     LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession(SessionMode.SYSTEM) }
@@ -225,6 +259,8 @@ private fun RailtermApp(service: TermService) {
             onClose = { closeSession(it) },
             onAdd = { addSession(SessionMode.SYSTEM) },
             onAddLinux = { addLinux() },
+            onLinuxManage = { linuxManageOpen = true },
+            onTheme = { themeOpen = true },
             onCopilot = { copilotOpen = !copilotOpen },
             onSettings = { settingsOpen = true },
         )
@@ -315,8 +351,32 @@ private fun RailtermApp(service: TermService) {
             onDismiss = { settingsOpen = false },
         )
     }
+
+    if (distroPickerOpen) {
+        DistroPickerDialog(
+            onPick = { installDistro(it) },
+            onDismiss = { distroPickerOpen = false },
+        )
+    }
+
+    if (linuxManageOpen) {
+        LinuxManageDialog(
+            distro = Userland.installedDistro(ctx),
+            onUninstall = { uninstallLinux() },
+            onDismiss = { linuxManageOpen = false },
+        )
+    }
+
+    if (themeOpen) {
+        ThemePickerDialog(
+            currentId = currentThemeId,
+            onPick = { setTheme(it) },
+            onDismiss = { themeOpen = false },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TabRail(
     sessions: List<Pair<String, Boolean>>,
@@ -325,6 +385,8 @@ private fun TabRail(
     onClose: (Int) -> Unit,
     onAdd: () -> Unit,
     onAddLinux: () -> Unit,
+    onLinuxManage: () -> Unit,
+    onTheme: () -> Unit,
     onCopilot: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -394,14 +456,25 @@ private fun TabRail(
                 .clickable { onAdd() }
                 .padding(horizontal = 16.dp, vertical = 9.dp),
         )
-        // New Linux (Alpine) session — installs the userland on first use.
+        // New Linux session — opens the distro picker on first use, then just
+        // opens a session. Long-press to manage/uninstall the installed distro.
         Text(
             "🐧",
             fontSize = 13.sp,
             modifier = Modifier
                 .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                 .background(RailSurface)
-                .clickable { onAddLinux() }
+                .combinedClickable(onClick = { onAddLinux() }, onLongClick = { onLinuxManage() })
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+        )
+        // Terminal color theme picker.
+        Text(
+            "🎨",
+            fontSize = 13.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(RailSurface)
+                .clickable { onTheme() }
                 .padding(horizontal = 14.dp, vertical = 9.dp),
         )
         // AI copilot toggle.
@@ -465,7 +538,7 @@ private fun SetupOverlay(status: String?, error: String?, onDismiss: () -> Unit)
             LinearProgressIndicator(color = RailAccent, trackColor = RailKeyChip)
             Spacer(Modifier.height(14.dp))
             Text(
-                "One-time download (~3 MB). Then apk, python, git, ssh all work.",
+                "One-time download, sha256-verified. Then the package manager, python, git, ssh all work.",
                 color = RailDimText,
                 fontFamily = RailMono,
                 fontSize = 11.sp,
