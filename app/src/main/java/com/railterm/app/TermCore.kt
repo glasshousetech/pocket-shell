@@ -12,8 +12,8 @@ import java.io.File
  * run on a genuine pseudo-terminal, so isatty() is true, job control works, and
  * full-screen apps (vim, htop, ssh, less) render and resize correctly.
  */
-/** Which shell a session runs: the Android system shell, or Alpine via proot. */
-enum class SessionMode { SYSTEM, ALPINE }
+/** Which shell a session runs: the Android system shell, or a Linux distro via proot. */
+enum class SessionMode { SYSTEM, LINUX }
 
 object TermCore {
 
@@ -25,7 +25,7 @@ object TermCore {
     /**
      * Spawn a new interactive shell on its own PTY.
      *
-     * @param mode SYSTEM = Android's shell; ALPINE = the proot Linux userland
+     * @param mode SYSTEM = Android's shell; LINUX = the proot Linux userland
      *   (requires [Bootstrap.install] to have run first).
      * @param onRedraw invoked on the main thread whenever the screen changes;
      *   the caller pushes this into the attached TerminalView.
@@ -43,8 +43,12 @@ object TermCore {
         val home = context.filesDir.absolutePath
 
         return when (mode) {
-            SessionMode.ALPINE -> {
-                val args = Userland.prootArgs(context)
+            SessionMode.LINUX -> {
+                // Only one distro is installed at a time; fall back to Alpine
+                // defensively (should be unreachable — the UI only offers a
+                // LINUX session once Bootstrap.install has set a marker).
+                val distro = Userland.installedDistro(context) ?: Distro.Alpine
+                val args = Userland.prootArgs(context, distro)
                 TerminalSession(
                     args[0],                    // proot binary
                     home,                       // host cwd

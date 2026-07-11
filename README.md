@@ -51,14 +51,21 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
 - [x] Tab Rail multi-session UI + frosted glass
 - [x] On-screen extra keys + Ctrl pad, pinch-to-zoom, clipboard
 - [x] CI build + signed release pipeline
-- [x] **Userland / package manager** — tap the 🐧 tab to install a proot-mounted
-      **Alpine Linux** (one-time ~3 MB download, sha256-pinned). Real `apk`, `python`,
-      `git`, `ssh`, `vim`. proot ships as bundled native libs; see `Userland.kt` /
-      `Bootstrap.kt` and `THIRD_PARTY.md`.
-- [ ] Text selection toolbar polish + URL long-press
+- [x] **Userland / package manager** — tap the 🐧 tab to pick a distro (**Alpine
+      Linux** or **Ubuntu**, both sha256-pinned) and install a proot-mounted
+      rootfs on first use. Real `apk`/`apt`, `python`, `git`, `ssh`, `vim`.
+      Long-press the 🐧 tab to uninstall and pick again. proot ships as bundled
+      native libs; see `Userland.kt` / `Bootstrap.kt` / `LinuxUi.kt` and
+      `THIRD_PARTY.md`.
+- [x] **Text selection** — long-press to select a word, drag the handles to
+      extend, floating Copy/Paste toolbar, tap elsewhere to deselect (built on
+      terminal-view's own `TextSelectionCursorController`; see `TermView.kt`).
+- [x] **Color themes** — Kali default, Dracula, Solarized Dark, Nord, Gruvbox
+      Dark. Tap the 🎨 tab; persisted across restarts. See `TermTheme.kt` /
+      `ThemeUi.kt`.
 - [ ] Session persistence across process death
-- [ ] Color themes + configurable extra-keys row
-- [ ] Userland polish: pick distro, reset/uninstall, background install progress bar
+- [ ] Configurable extra-keys row
+- [ ] Background install progress bar polish (currently a blocking overlay)
 
 ## License
 

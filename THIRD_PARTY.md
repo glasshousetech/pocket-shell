@@ -15,8 +15,16 @@ https://github.com/green-green-avk/build-proot-android
 These are the only files Android permits an app to execute, so they ship in the
 native-lib dir rather than being downloaded.
 
-## Alpine Linux — downloaded at first use
+## Alpine Linux — downloaded at first use (optional distro)
 `alpine-minirootfs-3.20.10-<arch>.tar.gz`, fetched from
 https://dl-cdn.alpinelinux.org and verified against a pinned sha256 (see
 `Userland.kt`). Alpine is MIT-licensed; bundled packages carry their own licenses.
 Not redistributed in the repo — downloaded on demand.
+
+## Ubuntu — downloaded at first use (optional distro)
+`ubuntu-base-24.04.4-base-<arch>.tar.gz`, Canonical's official "Ubuntu Base"
+tarballs, fetched from https://cdimage.ubuntu.com/ubuntu-base/ and verified
+against a pinned sha256 independently recomputed from the downloaded tarball
+(see `Userland.kt`). Ubuntu is licensed under a mix of open-source licenses
+(GPL, LGPL, etc. per package) — see https://ubuntu.com/legal. Not redistributed
+in the repo — downloaded on demand.
