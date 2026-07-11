@@ -52,7 +52,10 @@ object Userland {
         val env = mutableListOf(
             "PROOT_LOADER=${loader(context).absolutePath}",
             "PROOT_TMP_DIR=${tmp.absolutePath}",
-            "PROOT_NO_SECCOMP=1", // some Android kernels reject proot's seccomp filter
+            // NB: do NOT set PROOT_NO_SECCOMP. Forcing proot to ptrace every
+            // syscall makes poll()/fork() return ENOSYS on modern kernels
+            // (verified on the android-14 emulator). Seccomp fast-path is
+            // correct here and matches Termux's default.
             "HOME=${context.filesDir.absolutePath}",
             "TERM=xterm-256color",
         )

@@ -147,5 +147,12 @@ object Bootstrap {
             "https://dl-cdn.alpinelinux.org/alpine/v3.20/main\n" +
                 "https://dl-cdn.alpinelinux.org/alpine/v3.20/community\n"
         )
+        // A clean prompt + welcome for interactive login shells.
+        File(root, "etc/profile.d").mkdirs()
+        File(root, "etc/profile.d/00-railterm.sh").writeText(
+            "export PS1='alpine:\\w\\$ '\n" +
+                "alias ll='ls -la'\n" +
+                "[ -f /etc/railterm-welcomed ] || { echo 'Alpine Linux on Railterm. Try: apk add python3 git'; touch /etc/railterm-welcomed; }\n"
+        )
     }
 }
