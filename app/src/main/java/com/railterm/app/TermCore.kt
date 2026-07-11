@@ -27,6 +27,11 @@ object TermCore {
      *
      * @param mode SYSTEM = Android's shell; LINUX = the proot Linux userland
      *   (requires [Bootstrap.install] to have run first).
+     * @param cwd optional starting directory, used only for SYSTEM sessions (a
+     *   best-effort restore of the prior working directory — see [SessionStore]).
+     *   Falls back to the app sandbox home if unset or no longer valid. LINUX
+     *   ignores this: its guest cwd is fixed by proot's `-w /root` regardless of
+     *   the host-side cwd passed here.
      * @param onRedraw invoked on the main thread whenever the screen changes;
      *   the caller pushes this into the attached TerminalView.
      * @param onTitle  invoked when the running program sets the window title.
@@ -35,6 +40,7 @@ object TermCore {
     fun newSession(
         context: Context,
         mode: SessionMode,
+        cwd: String? = null,
         onRedraw: (TerminalSession) -> Unit,
         onTitle: (TerminalSession) -> Unit,
         onFinished: (TerminalSession) -> Unit,
@@ -62,6 +68,7 @@ object TermCore {
             SessionMode.SYSTEM -> {
                 val tmp = context.cacheDir.absolutePath
                 val shell = shellPath()
+                val startDir = cwd?.takeIf { File(it).isDirectory } ?: home
                 // A sane interactive environment. HOME lives inside the app sandbox
                 // so dotfiles/history persist; xterm-256color unlocks color.
                 val env = arrayOf(
@@ -74,7 +81,7 @@ object TermCore {
                 )
                 TerminalSession(
                     shell,
-                    home,
+                    startDir,
                     arrayOf(shell, "-i"),
                     env,
                     4000,
