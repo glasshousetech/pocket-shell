@@ -1,18 +1,14 @@
 package com.railterm.app
 
 import android.content.res.Configuration
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
@@ -21,9 +17,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,19 +24,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.res.ResourcesCompat
 import com.railterm.app.ui.*
+import com.termux.terminal.TerminalSession
+import com.termux.view.TerminalView
 
-private data class Session(val id: Int, val label: String, val shell: ShellSession)
+private class Session(
+    val id: Int,
+    val label: MutableState<String>,
+    val alive: MutableState<Boolean>,
+    val session: TerminalSession,
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Clip.init(this)
 
-        // Real frosted-glass behind the window (Kali-style translucent terminal),
+        // Real frosted-glass behind the window (Kali-style translucent chrome),
         // not just a tinted overlay. Older devices still get the plain see-through
         // wallpaper from the theme, just without the blur.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -63,64 +66,103 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun RailtermApp() {
-    val scope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current // recomposes on config change
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val density = LocalDensity.current
+    val fontPx = remember { with(density) { 13.sp.toPx() }.toInt().coerceAtLeast(18) }
+    val mono = remember {
+        runCatching { ResourcesCompat.getFont(ctx, R.font.jbm_regular) }.getOrNull() ?: Typeface.MONOSPACE
+    }
+
     val sessions = remember { mutableStateListOf<Session>() }
     var activeIndex by remember { mutableIntStateOf(0) }
     var nextId by remember { mutableIntStateOf(1) }
     var extraKeysOpen by remember { mutableStateOf(false) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
-    val drafts = remember { mutableStateMapOf<Int, String>() }
+
+    val termViewRef = remember { mutableStateOf<TerminalView?>(null) }
+    val viewClient = remember { RailViewClient(ctx, fontPx) }
 
     fun addSession() {
         val id = nextId++
-        val shell = ShellSession(scope)
-        shell.start()
-        sessions.add(Session(id, "sh $id", shell))
+        val label = mutableStateOf("sh $id")
+        val alive = mutableStateOf(true)
+        val session = TermCore.newSession(
+            ctx,
+            onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } },
+            onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
+            onFinished = { alive.value = false },
+        )
+        sessions.add(Session(id, label, alive, session))
         activeIndex = sessions.size - 1
+        termViewRef.value?.let {
+            it.attachSession(session)
+            it.onScreenUpdated()
+            viewClient.showKeyboard()
+        }
     }
 
     LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession() }
-
-    // Real fix, not a demo toggle: reflects whether a hardware keyboard is
-    // actually attached and exposed right now.
-    val config = LocalConfiguration.current
-    val hardwareKeyboardAttached = config.keyboard == Configuration.KEYBOARD_QWERTY &&
-        config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
-
     if (sessions.isEmpty()) return
 
     val active = sessions[activeIndex.coerceIn(0, sessions.size - 1)]
 
+    // Reflects whether a hardware keyboard is actually attached right now.
+    val hardwareKeyboardAttached = configuration.keyboard == Configuration.KEYBOARD_QWERTY &&
+        configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+
+    fun sendKey(code: Int) { termViewRef.value?.handleKeyCode(code, 0) }
+    fun sendCtrl(cp: Int) { termViewRef.value?.inputCodePoint(cp, true, false); ctrlMenuOpen = false }
+    fun sendLiteral(ch: Char) { termViewRef.value?.inputCodePoint(ch.code, false, false) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         TabRail(
-            sessions = sessions.map { it.label to it.shell.isAlive.value },
+            sessions = sessions.map { it.label.value to it.alive.value },
             activeIndex = activeIndex,
             onSelect = { activeIndex = it },
             onAdd = { addSession() },
         )
 
-        Crossfade(targetState = active.id, modifier = Modifier.weight(1f), label = "session") { id ->
-            val shown = sessions.firstOrNull { it.id == id } ?: active
-            TerminalBody(text = shown.shell.output.value, modifier = Modifier.fillMaxSize())
-        }
+        AndroidView(
+            modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg),
+            factory = { c ->
+                TerminalView(c, null).apply {
+                    setTerminalViewClient(viewClient)
+                    viewClient.view = this
+                    keepScreenOn = true
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    setTypeface(mono)
+                    setTextSize(fontPx)
+                    attachSession(active.session)
+                    onScreenUpdated()
+                    termViewRef.value = this
+                    post { viewClient.showKeyboard() }
+                }
+            },
+            update = { v ->
+                if (v.currentSession !== active.session) {
+                    v.attachSession(active.session)
+                    v.onScreenUpdated()
+                }
+            },
+        )
 
         if (!hardwareKeyboardAttached) {
             AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
-                Column {
-                    if (ctrlMenuOpen) {
-                        CtrlMenu(onKey = { byte ->
-                            active.shell.sendControlByte(byte)
-                            ctrlMenuOpen = false
-                        })
-                    } else {
-                        ExtraKeysRow(
-                            onEsc = { active.shell.sendControlByte(0x1B) },
-                            onTab = { active.shell.sendControlByte(0x09) },
-                            onCtrl = { ctrlMenuOpen = true },
-                            onLiteral = { ch -> drafts[active.id] = (drafts[active.id] ?: "") + ch },
-                            onArrow = { seq -> active.shell.sendEscape("$seq") },
-                        )
-                    }
+                if (ctrlMenuOpen) {
+                    CtrlMenu(onKey = { cp -> sendCtrl(cp) })
+                } else {
+                    ExtraKeysRow(
+                        onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
+                        onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
+                        onCtrl = { ctrlMenuOpen = true },
+                        onLiteral = { ch -> sendLiteral(ch) },
+                        onUp = { sendKey(KeyEvent.KEYCODE_DPAD_UP) },
+                        onDown = { sendKey(KeyEvent.KEYCODE_DPAD_DOWN) },
+                        onLeft = { sendKey(KeyEvent.KEYCODE_DPAD_LEFT) },
+                        onRight = { sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) },
+                    )
                 }
             }
             ExtraKeysHandle(
@@ -128,15 +170,6 @@ private fun RailtermApp() {
                 onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false },
             )
         }
-
-        InputBar(
-            value = drafts[active.id] ?: "",
-            onValueChange = { drafts[active.id] = it },
-            onSubmit = {
-                active.shell.sendLine(drafts[active.id] ?: "")
-                drafts[active.id] = ""
-            },
-        )
     }
 }
 
@@ -205,70 +238,15 @@ private fun TabRail(
 }
 
 @Composable
-private fun TerminalBody(text: String, modifier: Modifier = Modifier) {
-    val scrollState = rememberScrollState()
-    LaunchedEffect(text) { scrollState.animateScrollTo(scrollState.maxValue) }
-
-    val shown = text.ifEmpty { "starting shell…" }
-    val priorLines = shown.substringBeforeLast("\n", "")
-    val liveLine = if (priorLines.isEmpty()) shown else shown.substringAfterLast("\n")
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(RailBg)
-            .verticalScroll(scrollState)
-            .padding(16.dp, 12.dp),
-    ) {
-        if (priorLines.isNotEmpty()) {
-            Text(
-                text = priorLines,
-                color = RailOutText,
-                fontFamily = RailMono,
-                fontWeight = FontWeight.Normal,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = liveLine,
-                color = RailOutText,
-                fontFamily = RailMono,
-                fontWeight = FontWeight.Normal,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-            )
-            BlinkingCursor(RailPromptText)
-        }
-    }
-}
-
-@Composable
-private fun BlinkingCursor(color: Color) {
-    val transition = rememberInfiniteTransition(label = "cursor")
-    val alpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(animation = tween(600), repeatMode = RepeatMode.Reverse),
-        label = "cursorAlpha",
-    )
-    Box(
-        modifier = Modifier
-            .padding(start = 2.dp)
-            .width(7.dp)
-            .height(15.dp)
-            .background(color.copy(alpha = alpha)),
-    )
-}
-
-@Composable
 private fun ExtraKeysRow(
     onEsc: () -> Unit,
     onTab: () -> Unit,
     onCtrl: () -> Unit,
-    onLiteral: (String) -> Unit,
-    onArrow: (String) -> Unit,
+    onLiteral: (Char) -> Unit,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+    onLeft: () -> Unit,
+    onRight: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -280,16 +258,18 @@ private fun ExtraKeysRow(
         KeyChip("ESC", Modifier.weight(1f), onEsc)
         KeyChip("TAB", Modifier.weight(1f), onTab)
         KeyChip("CTRL", Modifier.weight(1f), onCtrl)
-        KeyChip("|", Modifier.weight(1f)) { onLiteral("|") }
-        KeyChip("-", Modifier.weight(1f)) { onLiteral("-") }
-        KeyChip("←", Modifier.weight(1f)) { onArrow("[D") }
-        KeyChip("→", Modifier.weight(1f)) { onArrow("[C") }
+        KeyChip("|", Modifier.weight(1f)) { onLiteral('|') }
+        KeyChip("/", Modifier.weight(1f)) { onLiteral('/') }
+        KeyChip("↑", Modifier.weight(1f), onUp)
+        KeyChip("↓", Modifier.weight(1f), onDown)
+        KeyChip("←", Modifier.weight(1f), onLeft)
+        KeyChip("→", Modifier.weight(1f), onRight)
     }
 }
 
 @Composable
 private fun CtrlMenu(onKey: (Int) -> Unit) {
-    val combos = listOf("C" to 0x03, "D" to 0x04, "Z" to 0x1A, "L" to 0x0C, "A" to 0x01, "E" to 0x05)
+    val combos = listOf("C" to 'c', "D" to 'd', "Z" to 'z', "L" to 'l', "A" to 'a', "E" to 'e', "R" to 'r')
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -297,8 +277,8 @@ private fun CtrlMenu(onKey: (Int) -> Unit) {
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        combos.forEach { (letter, byte) ->
-            KeyChip("^$letter", Modifier.weight(1f)) { onKey(byte) }
+        combos.forEach { (letter, ch) ->
+            KeyChip("^$letter", Modifier.weight(1f)) { onKey(ch.code) }
         }
     }
 }
@@ -334,41 +314,5 @@ private fun ExtraKeysHandle(open: Boolean, onToggle: () -> Unit) {
                 .clip(RoundedCornerShape(3.dp))
                 .background(if (open) RailAccentDim else Color(0xFF3A4368)),
         )
-    }
-}
-
-@Composable
-private fun InputBar(value: String, onValueChange: (String) -> Unit, onSubmit: () -> Unit) {
-    Column {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(RailAccentDim.copy(alpha = 0.25f)))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(RailSurface)
-                .padding(12.dp, 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("$", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(8.dp))
-            TextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.weight(1f),
-                textStyle = androidx.compose.ui.text.TextStyle(
-                    fontFamily = RailMono,
-                    fontSize = 14.sp,
-                color = RailPromptText,
-            ),
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-            ),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onSubmit() }),
-            )
-        }
     }
 }
