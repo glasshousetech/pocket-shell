@@ -304,9 +304,11 @@ private fun RailtermApp(service: TermService) {
         SettingsDialog(
             initialKey = Secrets.apiKey(ctx),
             initialModel = Secrets.model(ctx),
-            onSave = { key, model ->
+            initialBase = Secrets.baseUrl(ctx),
+            onSave = { key, model, base ->
                 Secrets.setApiKey(ctx, key)
                 Secrets.setModel(ctx, model)
+                Secrets.setBaseUrl(ctx, base)
                 settingsOpen = false
                 copilotOpen = true
             },

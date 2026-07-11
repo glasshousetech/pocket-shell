@@ -18,7 +18,6 @@ import java.net.URL
 object AiCopilot {
     enum class Mode { COMMAND, EXPLAIN }
 
-    private const val ENDPOINT = "https://api.anthropic.com/v1/messages"
     private const val VERSION = "2023-06-01"
 
     private const val SYSTEM_COMMAND =
@@ -67,8 +66,9 @@ object AiCopilot {
             )
         }
 
+        val endpoint = Secrets.baseUrl(context).trimEnd('/') + "/v1/messages"
         try {
-            val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
                 connectTimeout = 20_000

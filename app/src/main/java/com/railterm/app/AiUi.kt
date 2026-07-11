@@ -124,11 +124,13 @@ private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modi
 fun SettingsDialog(
     initialKey: String,
     initialModel: String,
-    onSave: (String, String) -> Unit,
+    initialBase: String,
+    onSave: (String, String, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var key by remember { mutableStateOf(initialKey) }
     var model by remember { mutableStateOf(initialModel) }
+    var base by remember { mutableStateOf(initialBase) }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -176,13 +178,29 @@ fun SettingsDialog(
                     }
                 }
             }
+            Text("Endpoint (advanced — GHT staff / proxy)", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
+            TextField(
+                value = base,
+                onValueChange = { base = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text(Secrets.DEFAULT_BASE, color = RailDimText, fontFamily = RailMono, fontSize = 12.sp) },
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = RailMono, fontSize = 12.sp, color = RailPromptText),
+                colors = TextFieldDefaults.colors(
+                    unfocusedContainerColor = RailKeyChip,
+                    focusedContainerColor = RailKeyChip,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    cursorColor = RailAccent,
+                ),
+            )
             Text(
-                "Get a key at console.anthropic.com/settings/keys. @ght.network staff: Halo support coming.",
+                "Get a key at console.anthropic.com/settings/keys. Leave the endpoint as-is unless you're pointing at a GHT Halo proxy.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
                 TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
-                TextButton(onClick = { onSave(key, model) }) { Text("Save", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { onSave(key, model, base) }) { Text("Save", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold) }
             }
         }
     }

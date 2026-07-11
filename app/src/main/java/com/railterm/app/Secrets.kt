@@ -14,9 +14,13 @@ object Secrets {
     private const val FILE = "railterm_secrets"
     private const val KEY_API = "anthropic_api_key"
     private const val KEY_MODEL = "ai_model"
+    private const val KEY_BASE = "ai_base_url"
 
     /** Default per the Claude API guidance: highest-quality model unless changed. */
     const val DEFAULT_MODEL = "claude-opus-4-8"
+
+    /** Anthropic by default; GHT staff can point this at a Halo proxy instead. */
+    const val DEFAULT_BASE = "https://api.anthropic.com"
 
     val MODELS: List<Pair<String, String>> = listOf(
         "claude-opus-4-8" to "Opus 4.8",
@@ -48,5 +52,11 @@ object Secrets {
         prefs(context).getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
     fun setModel(context: Context, value: String) {
         prefs(context).edit().putString(KEY_MODEL, value).apply()
+    }
+
+    fun baseUrl(context: Context): String =
+        prefs(context).getString(KEY_BASE, DEFAULT_BASE)?.ifBlank { DEFAULT_BASE } ?: DEFAULT_BASE
+    fun setBaseUrl(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_BASE, value.trim().ifBlank { DEFAULT_BASE }).apply()
     }
 }
