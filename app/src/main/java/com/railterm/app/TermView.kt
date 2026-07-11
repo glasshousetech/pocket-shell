@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
@@ -82,10 +83,28 @@ class RailViewClient(
     override fun shouldEnforceCharBasedInput(): Boolean = true
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
     override fun isTerminalViewSelected(): Boolean = true
-    override fun copyModeChanged(copyMode: Boolean) {}
+
+    // terminal-view drives the entire selection UX itself once we don't block
+    // it (see onLongPress below): long-press expands to a word, drag handles
+    // extend/shrink the range, and a floating ActionMode toolbar with
+    // Copy/Paste/More appears automatically. We only add a one-time nudge the
+    // very first time a selection starts, since the ActionMode toolbar isn't
+    // obvious on a first run.
+    override fun copyModeChanged(copyMode: Boolean) {
+        if (!copyMode) return
+        val prefs = context.getSharedPreferences("railterm_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean(SEEN_SELECTION_HINT, false)) return
+        prefs.edit().putBoolean(SEEN_SELECTION_HINT, true).apply()
+        Toast.makeText(context, "Selected — drag the handles to adjust, then tap Copy", Toast.LENGTH_LONG).show()
+    }
 
     override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
     override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
+
+    // Returning false lets TerminalView run its own default long-press
+    // handling (TerminalView#onLongPress -> startTextSelectionMode), which is
+    // where word-selection + handles + the Copy toolbar come from. Returning
+    // true here would suppress all of that, so we deliberately don't.
     override fun onLongPress(e: MotionEvent): Boolean = false
 
     override fun readControlKey(): Boolean = ctrlDown
@@ -111,5 +130,8 @@ class RailViewClient(
     }
     override fun logStackTrace(tag: String?, e: Exception?) { Log.e(tag ?: TAG, "", e) }
 
-    private companion object { const val TAG = "Railterm" }
+    private companion object {
+        const val TAG = "Railterm"
+        const val SEEN_SELECTION_HINT = "seen_selection_hint"
+    }
 }
