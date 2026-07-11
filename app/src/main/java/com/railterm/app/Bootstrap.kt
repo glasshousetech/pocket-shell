@@ -98,13 +98,14 @@ object Bootstrap {
     private fun extract(root: File, tarFile: File) {
         val rootCanon = root.canonicalPath
         TarArchiveInputStream(GZIPInputStream(BufferedInputStream(FileInputStream(tarFile)))).use { tar ->
-            var entry: TarArchiveEntry? = tar.nextEntry as TarArchiveEntry?
-            while (entry != null) {
+            var next: TarArchiveEntry? = tar.nextEntry as TarArchiveEntry?
+            while (next != null) {
+                val entry = next // stable non-null binding (avoids smart-cast-in-closure)
                 val out = File(root, entry.name)
                 // Guard against path traversal (../ entries).
                 val canon = out.canonicalPath
                 if (canon != rootCanon && !canon.startsWith(rootCanon + File.separator)) {
-                    entry = tar.nextEntry as TarArchiveEntry?
+                    next = tar.nextEntry as TarArchiveEntry?
                     continue
                 }
                 when {
@@ -130,7 +131,7 @@ object Bootstrap {
                         runCatching { Os.chmod(out.absolutePath, entry.mode and 0xFFF) }
                     }
                 }
-                entry = tar.nextEntry as TarArchiveEntry?
+                next = tar.nextEntry as TarArchiveEntry?
             }
         }
     }
