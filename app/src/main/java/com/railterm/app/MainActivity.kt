@@ -157,8 +157,8 @@ private fun RailtermApp() {
                         keepScreenOn = true
                         isFocusable = true
                         isFocusableInTouchMode = true
+                        setTextSize(fontPx) // creates the renderer; must precede setTypeface
                         setTypeface(mono)
-                        setTextSize(fontPx)
                         attachSession(active.session)
                         onScreenUpdated()
                         termViewRef.value = this
