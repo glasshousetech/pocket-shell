@@ -88,6 +88,15 @@ private fun RailtermApp() {
     var setupStatus by remember { mutableStateOf<String?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
 
+    // AI copilot state
+    var copilotOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    var aiInput by remember { mutableStateOf("") }
+    var aiBusy by remember { mutableStateOf(false) }
+    var aiResult by remember { mutableStateOf<String?>(null) }
+    var aiError by remember { mutableStateOf<String?>(null) }
+    var aiIsCommand by remember { mutableStateOf(true) }
+
     fun addSession(mode: SessionMode) {
         val id = nextId++
         val prefix = if (mode == SessionMode.ALPINE) "linux" else "sh"
@@ -138,6 +147,33 @@ private fun RailtermApp() {
     fun sendCtrl(cp: Int) { termViewRef.value?.inputCodePoint(cp, true, false); ctrlMenuOpen = false }
     fun sendLiteral(ch: Char) { termViewRef.value?.inputCodePoint(ch.code, false, false) }
 
+    fun terminalText(): String? =
+        runCatching { active.session.emulator?.screen?.transcriptText }.getOrNull()
+
+    fun askAi(mode: AiCopilot.Mode) {
+        if (!Secrets.hasApiKey(ctx)) { settingsOpen = true; return }
+        val prompt = if (mode == AiCopilot.Mode.COMMAND) aiInput.trim()
+            else "Explain the recent output and any error, and suggest a fix if applicable."
+        if (mode == AiCopilot.Mode.COMMAND && prompt.isEmpty()) return
+        aiError = null; aiResult = null; aiBusy = true
+        aiIsCommand = mode == AiCopilot.Mode.COMMAND
+        val termText = terminalText()
+        scope.launch {
+            val res = AiCopilot.ask(ctx, prompt, termText, mode)
+            aiBusy = false
+            res.onSuccess { aiResult = it; if (aiIsCommand) aiInput = "" }
+                .onFailure { aiError = it.message ?: "Request failed." }
+        }
+    }
+
+    fun insertToTerminal(cmd: String, run: Boolean) {
+        val text = cmd.trim()
+        active.session.write(if (run && !text.endsWith("\n")) "$text\n" else text)
+        aiResult = null
+        copilotOpen = false
+        termViewRef.value?.let { it.requestFocus(); viewClient.showKeyboard() }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         TabRail(
             sessions = sessions.map { it.label.value to it.alive.value },
@@ -145,6 +181,8 @@ private fun RailtermApp() {
             onSelect = { activeIndex = it },
             onAdd = { addSession(SessionMode.SYSTEM) },
             onAddLinux = { addLinux() },
+            onCopilot = { copilotOpen = !copilotOpen },
+            onSettings = { settingsOpen = true },
         )
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg)) {
@@ -178,6 +216,22 @@ private fun RailtermApp() {
             }
         }
 
+        if (copilotOpen) {
+            CopilotPanel(
+                input = aiInput,
+                onInput = { aiInput = it },
+                busy = aiBusy,
+                result = aiResult,
+                error = aiError,
+                isCommand = aiIsCommand,
+                onSend = { askAi(AiCopilot.Mode.COMMAND) },
+                onExplain = { askAi(AiCopilot.Mode.EXPLAIN) },
+                onInsert = { insertToTerminal(it, run = false) },
+                onRun = { insertToTerminal(it, run = true) },
+                onSettings = { settingsOpen = true },
+            )
+        }
+
         if (!hardwareKeyboardAttached) {
             AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
                 if (ctrlMenuOpen) {
@@ -201,6 +255,20 @@ private fun RailtermApp() {
             )
         }
     }
+
+    if (settingsOpen) {
+        SettingsDialog(
+            initialKey = Secrets.apiKey(ctx),
+            initialModel = Secrets.model(ctx),
+            onSave = { key, model ->
+                Secrets.setApiKey(ctx, key)
+                Secrets.setModel(ctx, model)
+                settingsOpen = false
+                copilotOpen = true
+            },
+            onDismiss = { settingsOpen = false },
+        )
+    }
 }
 
 @Composable
@@ -210,6 +278,8 @@ private fun TabRail(
     onSelect: (Int) -> Unit,
     onAdd: () -> Unit,
     onAddLinux: () -> Unit,
+    onCopilot: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -273,6 +343,27 @@ private fun TabRail(
                 .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                 .background(RailSurface)
                 .clickable { onAddLinux() }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+        )
+        // AI copilot toggle.
+        Text(
+            "✨",
+            fontSize = 13.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(RailSurface)
+                .clickable { onCopilot() }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+        )
+        // Settings.
+        Text(
+            "⚙",
+            color = RailAccentDim,
+            fontSize = 15.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(RailSurface)
+                .clickable { onSettings() }
                 .padding(horizontal = 14.dp, vertical = 9.dp),
         )
     }

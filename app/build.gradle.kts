@@ -81,6 +81,9 @@ dependencies {
     // Extract the Alpine rootfs tarball (tar) with symlink/mode fidelity.
     implementation("org.apache.commons:commons-compress:1.26.2")
 
+    // Encrypted storage for the user's Anthropic API key (AI copilot, BYO-key).
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // Real terminal engine: native PTY + VT100/xterm emulator + Android view.
     // Prebuilt .so for all ABIs ships in the AAR — no NDK needed. GPLv3.
     // terminal-emulator is pulled in transitively.
