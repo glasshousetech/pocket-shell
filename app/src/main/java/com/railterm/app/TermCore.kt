@@ -29,7 +29,7 @@ object TermCore {
      *   (requires [Bootstrap.install] to have run first).
      * @param cwd optional starting directory, used only for SYSTEM sessions (a
      *   best-effort restore of the prior working directory — see [SessionStore]).
-     *   Falls back to the app sandbox home if unset or no longer valid. ALPINE
+     *   Falls back to the app sandbox home if unset or no longer valid. LINUX
      *   ignores this: its guest cwd is fixed by proot's `-w /root` regardless of
      *   the host-side cwd passed here.
      * @param onRedraw invoked on the main thread whenever the screen changes;

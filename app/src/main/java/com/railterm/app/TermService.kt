@@ -131,7 +131,7 @@ class TermService : Service() {
 
         var restoredAny = false
         saved.forEach { entry ->
-            if (entry.mode == SessionMode.ALPINE && !Userland.isInstalled(this)) return@forEach
+            if (entry.mode == SessionMode.LINUX && Userland.installedDistro(this) == null) return@forEach
             runCatching { restoreSession(entry) }
                 .onSuccess { restoredAny = true }
         }
@@ -142,7 +142,7 @@ class TermService : Service() {
 
     private fun restoreSession(entry: SessionStore.Saved): TermSession {
         val id = nextId++
-        val fallbackPrefix = if (entry.mode == SessionMode.ALPINE) "linux" else "sh"
+        val fallbackPrefix = if (entry.mode == SessionMode.LINUX) "linux" else "sh"
         val label = mutableStateOf(entry.title.ifBlank { "$fallbackPrefix $id" })
         val alive = mutableStateOf(true)
         val session = TermCore.newSession(
