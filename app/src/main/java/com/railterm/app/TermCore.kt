@@ -12,6 +12,9 @@ import java.io.File
  * run on a genuine pseudo-terminal, so isatty() is true, job control works, and
  * full-screen apps (vim, htop, ssh, less) render and resize correctly.
  */
+/** Which shell a session runs: the Android system shell, or Alpine via proot. */
+enum class SessionMode { SYSTEM, ALPINE }
+
 object TermCore {
 
     /** Best available system shell. Android has no login shell of its own. */
@@ -22,6 +25,8 @@ object TermCore {
     /**
      * Spawn a new interactive shell on its own PTY.
      *
+     * @param mode SYSTEM = Android's shell; ALPINE = the proot Linux userland
+     *   (requires [Bootstrap.install] to have run first).
      * @param onRedraw invoked on the main thread whenever the screen changes;
      *   the caller pushes this into the attached TerminalView.
      * @param onTitle  invoked when the running program sets the window title.
@@ -29,34 +34,50 @@ object TermCore {
      */
     fun newSession(
         context: Context,
+        mode: SessionMode,
         onRedraw: (TerminalSession) -> Unit,
         onTitle: (TerminalSession) -> Unit,
         onFinished: (TerminalSession) -> Unit,
     ): TerminalSession {
-        val home = context.filesDir.absolutePath
-        val tmp = context.cacheDir.absolutePath
-        val shell = shellPath()
-
-        // A sane interactive environment. HOME lives inside the app sandbox so
-        // dotfiles/history persist; xterm-256color unlocks color in most tools.
-        val env = arrayOf(
-            "TERM=xterm-256color",
-            "HOME=$home",
-            "TMPDIR=$tmp",
-            "PATH=/system/bin:/system/xbin",
-            "LANG=en_US.UTF-8",
-            "COLORTERM=truecolor",
-        )
-
         val client = RailSessionClient(onRedraw, onTitle, onFinished)
-        return TerminalSession(
-            shell,
-            home,                 // cwd
-            arrayOf(shell, "-i"), // argv: interactive shell
-            env,
-            /* transcriptRows = */ 4000,
-            client,
-        )
+        val home = context.filesDir.absolutePath
+
+        return when (mode) {
+            SessionMode.ALPINE -> {
+                val args = Userland.prootArgs(context)
+                TerminalSession(
+                    args[0],                    // proot binary
+                    home,                       // host cwd
+                    args,                       // full proot argv
+                    Userland.prootEnv(context),
+                    4000,
+                    client,
+                )
+            }
+
+            SessionMode.SYSTEM -> {
+                val tmp = context.cacheDir.absolutePath
+                val shell = shellPath()
+                // A sane interactive environment. HOME lives inside the app sandbox
+                // so dotfiles/history persist; xterm-256color unlocks color.
+                val env = arrayOf(
+                    "TERM=xterm-256color",
+                    "HOME=$home",
+                    "TMPDIR=$tmp",
+                    "PATH=/system/bin:/system/xbin",
+                    "LANG=en_US.UTF-8",
+                    "COLORTERM=truecolor",
+                )
+                TerminalSession(
+                    shell,
+                    home,
+                    arrayOf(shell, "-i"),
+                    env,
+                    4000,
+                    client,
+                )
+            }
+        }
     }
 }
 

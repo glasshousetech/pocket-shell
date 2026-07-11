@@ -51,17 +51,20 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
 - [x] Tab Rail multi-session UI + frosted glass
 - [x] On-screen extra keys + Ctrl pad, pinch-to-zoom, clipboard
 - [x] CI build + signed release pipeline
+- [x] **Userland / package manager** — tap the 🐧 tab to install a proot-mounted
+      **Alpine Linux** (one-time ~3 MB download, sha256-pinned). Real `apk`, `python`,
+      `git`, `ssh`, `vim`. proot ships as bundled native libs; see `Userland.kt` /
+      `Bootstrap.kt` and `THIRD_PARTY.md`.
 - [ ] Text selection toolbar polish + URL long-press
 - [ ] Session persistence across process death
 - [ ] Color themes + configurable extra-keys row
-- [ ] **Userland / package manager** (`apt`, `git`, `python`) — the big one; Termux
-      ships a bootstrap, Railterm currently runs on the Android system shell. Likely a
-      `proot`-distro path. Tracked as its own epic.
+- [ ] Userland polish: pick distro, reset/uninstall, background install progress bar
 
 ## License
 
 Railterm is licensed under the **GNU General Public License v3.0** (see `LICENSE`).
 
-It builds on Termux's terminal libraries, which are GPLv3 (with the underlying
-*Terminal Emulator for Android* code under Apache-2.0). Because Railterm links the
-Termux terminal engine, the app as a whole is distributed under GPLv3.
+It builds on Termux's terminal libraries (GPLv3) and bundles Android `proot` (GPLv2);
+the Alpine userland (MIT) is downloaded on demand. Because Railterm links the Termux
+terminal engine, the app as a whole is distributed under GPLv3. Full attribution in
+`THIRD_PARTY.md`.

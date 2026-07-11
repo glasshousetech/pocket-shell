@@ -62,6 +62,9 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // proot + loaders are shipped as lib*.so but must be extracted to the
+        // on-disk native lib dir so they can be executed (APK-internal .so can't).
+        jniLibs.useLegacyPackaging = true
     }
 }
 
@@ -74,6 +77,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Extract the Alpine rootfs tarball (tar) with symlink/mode fidelity.
+    implementation("org.apache.commons:commons-compress:1.26.2")
 
     // Real terminal engine: native PTY + VT100/xterm emulator + Android view.
     // Prebuilt .so for all ABIs ships in the AAR — no NDK needed. GPLv3.

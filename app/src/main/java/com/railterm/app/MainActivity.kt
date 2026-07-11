@@ -33,6 +33,8 @@ import androidx.core.content.res.ResourcesCompat
 import com.railterm.app.ui.*
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 private class Session(
     val id: Int,
@@ -82,13 +84,18 @@ private fun RailtermApp() {
 
     val termViewRef = remember { mutableStateOf<TerminalView?>(null) }
     val viewClient = remember { RailViewClient(ctx, fontPx) }
+    val scope = rememberCoroutineScope()
+    var setupStatus by remember { mutableStateOf<String?>(null) }
+    var setupError by remember { mutableStateOf<String?>(null) }
 
-    fun addSession() {
+    fun addSession(mode: SessionMode) {
         val id = nextId++
-        val label = mutableStateOf("sh $id")
+        val prefix = if (mode == SessionMode.ALPINE) "linux" else "sh"
+        val label = mutableStateOf("$prefix $id")
         val alive = mutableStateOf(true)
         val session = TermCore.newSession(
             ctx,
+            mode,
             onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { alive.value = false },
@@ -102,7 +109,23 @@ private fun RailtermApp() {
         }
     }
 
-    LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession() }
+    // First tap on Linux installs the Alpine userland (once), then opens a session.
+    fun addLinux() {
+        if (Userland.isInstalled(ctx)) { addSession(SessionMode.ALPINE); return }
+        if (!Userland.isAvailable(ctx)) { setupError = "Linux isn't available for this device's CPU."; return }
+        setupError = null
+        setupStatus = "Preparing Alpine Linux…"
+        scope.launch {
+            val result = Bootstrap.install(ctx) { msg ->
+                scope.launch(Dispatchers.Main) { setupStatus = msg }
+            }
+            setupStatus = null
+            result.onSuccess { addSession(SessionMode.ALPINE) }
+                .onFailure { setupError = it.message ?: "Install failed." }
+        }
+    }
+
+    LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession(SessionMode.SYSTEM) }
     if (sessions.isEmpty()) return
 
     val active = sessions[activeIndex.coerceIn(0, sessions.size - 1)]
@@ -120,33 +143,40 @@ private fun RailtermApp() {
             sessions = sessions.map { it.label.value to it.alive.value },
             activeIndex = activeIndex,
             onSelect = { activeIndex = it },
-            onAdd = { addSession() },
+            onAdd = { addSession(SessionMode.SYSTEM) },
+            onAddLinux = { addLinux() },
         )
 
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg),
-            factory = { c ->
-                TerminalView(c, null).apply {
-                    setTerminalViewClient(viewClient)
-                    viewClient.view = this
-                    keepScreenOn = true
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    setTypeface(mono)
-                    setTextSize(fontPx)
-                    attachSession(active.session)
-                    onScreenUpdated()
-                    termViewRef.value = this
-                    post { viewClient.showKeyboard() }
-                }
-            },
-            update = { v ->
-                if (v.currentSession !== active.session) {
-                    v.attachSession(active.session)
-                    v.onScreenUpdated()
-                }
-            },
-        )
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg)) {
+            AndroidView(
+                modifier = Modifier.matchParentSize(),
+                factory = { c ->
+                    TerminalView(c, null).apply {
+                        setTerminalViewClient(viewClient)
+                        viewClient.view = this
+                        keepScreenOn = true
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                        setTypeface(mono)
+                        setTextSize(fontPx)
+                        attachSession(active.session)
+                        onScreenUpdated()
+                        termViewRef.value = this
+                        post { viewClient.showKeyboard() }
+                    }
+                },
+                update = { v ->
+                    if (v.currentSession !== active.session) {
+                        v.attachSession(active.session)
+                        v.onScreenUpdated()
+                    }
+                },
+            )
+
+            if (setupStatus != null || setupError != null) {
+                SetupOverlay(status = setupStatus, error = setupError, onDismiss = { setupError = null })
+            }
+        }
 
         if (!hardwareKeyboardAttached) {
             AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
@@ -179,6 +209,7 @@ private fun TabRail(
     activeIndex: Int,
     onSelect: (Int) -> Unit,
     onAdd: () -> Unit,
+    onAddLinux: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -234,6 +265,62 @@ private fun TabRail(
                 .clickable { onAdd() }
                 .padding(horizontal = 16.dp, vertical = 9.dp),
         )
+        // New Linux (Alpine) session — installs the userland on first use.
+        Text(
+            "🐧",
+            fontSize = 13.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(RailSurface)
+                .clickable { onAddLinux() }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+        )
+    }
+}
+
+@Composable
+private fun SetupOverlay(status: String?, error: String?, onDismiss: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(RailBg.copy(alpha = 0.97f))
+            .clickable(enabled = error != null) { onDismiss() }
+            .padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("🐧", fontSize = 40.sp)
+        Spacer(Modifier.height(16.dp))
+        if (error != null) {
+            Text(
+                "Couldn't set up Linux",
+                color = RailPromptText,
+                fontFamily = RailMono,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(error, color = RailOutText, fontFamily = RailMono, fontSize = 12.sp)
+            Spacer(Modifier.height(18.dp))
+            Text("Tap to dismiss", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
+        } else {
+            Text(
+                status ?: "Working…",
+                color = RailPromptText,
+                fontFamily = RailMono,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+            LinearProgressIndicator(color = RailAccent, trackColor = RailKeyChip)
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "One-time download (~3 MB). Then apk, python, git, ssh all work.",
+                color = RailDimText,
+                fontFamily = RailMono,
+                fontSize = 11.sp,
+            )
+        }
     }
 }
 
