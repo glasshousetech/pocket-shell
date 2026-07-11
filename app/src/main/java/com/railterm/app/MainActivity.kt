@@ -1,13 +1,21 @@
 package com.railterm.app
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -36,17 +44,28 @@ import com.termux.view.TerminalView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-private class Session(
-    val id: Int,
-    val label: MutableState<String>,
-    val alive: MutableState<Boolean>,
-    val session: TerminalSession,
-)
-
 class MainActivity : ComponentActivity() {
+    private val serviceState = mutableStateOf<TermService?>(null)
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            serviceState.value = (binder as? TermService.LocalBinder)?.service
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            serviceState.value = null
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Clip.init(this)
+        requestNotificationPermission()
+
+        // Start + bind the foreground service that owns the terminal sessions, so
+        // they survive backgrounding and Activity recreation.
+        val intent = Intent(this, TermService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+        bindService(intent, connection, Context.BIND_AUTO_CREATE)
 
         // Real frosted-glass behind the window (Kali-style translucent chrome),
         // not just a tinted overlay. Older devices still get the plain see-through
@@ -59,15 +78,34 @@ class MainActivity : ComponentActivity() {
         setContent {
             RailtermTheme {
                 Surface(color = Color.Transparent) {
-                    RailtermApp()
+                    val service = serviceState.value
+                    if (service == null) Splash() else RailtermApp(service)
                 }
             }
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { unbindService(connection) }
+        super.onDestroy()
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
     }
 }
 
 @Composable
-private fun RailtermApp() {
+private fun Splash() {
+    Box(modifier = Modifier.fillMaxSize().background(RailBg))
+}
+
+@Composable
+private fun RailtermApp(service: TermService) {
     val configuration = LocalConfiguration.current // recomposes on config change
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
@@ -76,9 +114,9 @@ private fun RailtermApp() {
         runCatching { ResourcesCompat.getFont(ctx, R.font.jbm_regular) }.getOrNull() ?: Typeface.MONOSPACE
     }
 
-    val sessions = remember { mutableStateListOf<Session>() }
+    // Sessions live in the foreground service (survive backgrounding).
+    val sessions = service.sessions
     var activeIndex by remember { mutableIntStateOf(0) }
-    var nextId by remember { mutableIntStateOf(1) }
     var extraKeysOpen by remember { mutableStateOf(false) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
 
@@ -97,24 +135,29 @@ private fun RailtermApp() {
     var aiError by remember { mutableStateOf<String?>(null) }
     var aiIsCommand by remember { mutableStateOf(true) }
 
+    // Repaint the visible terminal when its session's screen changes.
+    LaunchedEffect(Unit) {
+        service.onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } }
+    }
+
     fun addSession(mode: SessionMode) {
-        val id = nextId++
-        val prefix = if (mode == SessionMode.ALPINE) "linux" else "sh"
-        val label = mutableStateOf("$prefix $id")
-        val alive = mutableStateOf(true)
-        val session = TermCore.newSession(
-            ctx,
-            mode,
-            onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } },
-            onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
-            onFinished = { alive.value = false },
-        )
-        sessions.add(Session(id, label, alive, session))
-        activeIndex = sessions.size - 1
+        val holder = service.newSession(mode)
+        activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
         termViewRef.value?.let {
-            it.attachSession(session)
+            it.attachSession(holder.session)
             it.onScreenUpdated()
             viewClient.showKeyboard()
+        }
+    }
+
+    fun closeSession(index: Int) {
+        val holder = sessions.getOrNull(index) ?: return
+        service.closeSession(holder)
+        if (sessions.isEmpty()) { addSession(SessionMode.SYSTEM); return }
+        activeIndex = activeIndex.coerceIn(0, sessions.size - 1)
+        termViewRef.value?.let {
+            it.attachSession(sessions[activeIndex].session)
+            it.onScreenUpdated()
         }
     }
 
@@ -179,6 +222,7 @@ private fun RailtermApp() {
             sessions = sessions.map { it.label.value to it.alive.value },
             activeIndex = activeIndex,
             onSelect = { activeIndex = it },
+            onClose = { closeSession(it) },
             onAdd = { addSession(SessionMode.SYSTEM) },
             onAddLinux = { addLinux() },
             onCopilot = { copilotOpen = !copilotOpen },
@@ -276,6 +320,7 @@ private fun TabRail(
     sessions: List<Pair<String, Boolean>>,
     activeIndex: Int,
     onSelect: (Int) -> Unit,
+    onClose: (Int) -> Unit,
     onAdd: () -> Unit,
     onAddLinux: () -> Unit,
     onCopilot: () -> Unit,
@@ -314,6 +359,18 @@ private fun TabRail(
                         fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                         fontSize = 12.sp,
                     )
+                    if (active) {
+                        Text(
+                            "✕",
+                            color = RailDimText,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onClose(i) }
+                                .padding(horizontal = 3.dp),
+                        )
+                    }
                 }
                 Box(
                     modifier = Modifier
