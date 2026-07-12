@@ -1,6 +1,6 @@
 # Third-party components
 
-Railterm bundles and downloads the following. Railterm itself is GPLv3 (see `LICENSE`).
+Pocket Shell bundles and downloads the following. Pocket Shell itself is GPLv3 (see `LICENSE`).
 
 ## Terminal engine — Termux
 `com.termux.termux-app:terminal-view` / `terminal-emulator` (JitPack, v0.118.0).

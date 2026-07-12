@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.Context
 import android.os.Build
@@ -75,7 +75,7 @@ object Userland {
     fun rootfsFor(distro: Distro, abi: String): Rootfs? = rootfsMap(distro)[abi]
 
     fun rootfsDir(context: Context, distro: Distro): File = File(context.filesDir, distro.dirName)
-    fun installedMarker(context: Context, distro: Distro): File = File(rootfsDir(context, distro), ".railterm_installed")
+    fun installedMarker(context: Context, distro: Distro): File = File(rootfsDir(context, distro), ".pocketshell_installed")
     fun isInstalled(context: Context, distro: Distro): Boolean = installedMarker(context, distro).exists()
 
     /** Whichever distro is currently installed, if any (only one at a time). */

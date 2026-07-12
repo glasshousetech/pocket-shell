@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +21,7 @@ object AiCopilot {
     private const val VERSION = "2023-06-01"
 
     private const val SYSTEM_COMMAND =
-        "You are a command-line copilot embedded in Railterm, an Android terminal that runs either " +
+        "You are a command-line copilot embedded in Pocket Shell, an Android terminal that runs either " +
             "the Android system shell (Toybox) or Alpine Linux via proot. The user tells you what they " +
             "want to do; reply with ONLY the shell command(s) that accomplish it. No explanation, no " +
             "markdown, no backticks, no code fences. Chain steps with && or newlines. Prefer POSIX/busybox " +
@@ -29,7 +29,7 @@ object AiCopilot {
             "with '# ' explaining why."
 
     private const val SYSTEM_EXPLAIN =
-        "You are a command-line copilot embedded in Railterm (Android terminal). The user shares recent " +
+        "You are a command-line copilot embedded in Pocket Shell (Android terminal). The user shares recent " +
             "terminal output or an error. Explain what it means in 1-3 short sentences, then, if there is a " +
             "fix, add a final line 'Fix: <command>'. Be concise. No markdown."
 

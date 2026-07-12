@@ -1,13 +1,13 @@
-# Railterm
+# Pocket Shell
 
 A fast, good-looking terminal emulator for Android — by Glass House Technologies.
 
-Railterm pairs a **real PTY-backed terminal** (so `vim`, `ssh`, `htop`, `less`, and
+Pocket Shell pairs a **real PTY-backed terminal** (so `vim`, `ssh`, `htop`, `less`, and
 tab-completion all work) with a modern **Tab Rail** multi-session UI and a Kali-style
 frosted-glass look. The goal is a terminal that feels like a native app, not a
 1990s console bolted onto a phone.
 
-## Why Railterm over the alternatives
+## Why Pocket Shell over the alternatives
 
 - **Tab Rail** — multiple live shells in one window, switch instantly. No swipe-drawer.
 - **Frosted glass** — real window blur (Android 12+) so the terminal sits over your
@@ -26,7 +26,7 @@ frosted-glass look. The goal is a terminal that feels like a native app, not a
 | Session engine | PTY spawn + VT100/xterm emulation | `TermCore.kt` → Termux libs |
 
 The terminal engine is **Termux's** `terminal-view` / `terminal-emulator` libraries
-(prebuilt native PTY, all ABIs, pulled from JitPack). Railterm wraps that proven core
+(prebuilt native PTY, all ABIs, pulled from JitPack). Pocket Shell wraps that proven core
 in its own UI rather than reimplementing a terminal emulator from scratch.
 
 ## Build
@@ -43,7 +43,7 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
   Requires `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
   `ANDROID_KEY_PASSWORD` (and optional `PLAY_SERVICE_ACCOUNT_JSON`) as repo secrets.
 
-`minSdk 26 · targetSdk 34 · applicationId com.railterm.app`
+`minSdk 26 · targetSdk 34 · applicationId network.ght.pocketshell`
 
 ## Roadmap
 
@@ -63,15 +63,15 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
 - [x] **Color themes** — Kali default, Dracula, Solarized Dark, Nord, Gruvbox
       Dark. Tap the 🎨 tab; persisted across restarts. See `TermTheme.kt` /
       `ThemeUi.kt`.
-- [ ] Session persistence across process death
+- [x] Session persistence across process death (best-effort scrollback replay; see `SessionStore.kt`)
 - [ ] Configurable extra-keys row
 - [ ] Background install progress bar polish (currently a blocking overlay)
 
 ## License
 
-Railterm is licensed under the **GNU General Public License v3.0** (see `LICENSE`).
+Pocket Shell is licensed under the **GNU General Public License v3.0** (see `LICENSE`).
 
 It builds on Termux's terminal libraries (GPLv3) and bundles Android `proot` (GPLv2);
-the Alpine userland (MIT) is downloaded on demand. Because Railterm links the Termux
+the Alpine userland (MIT) is downloaded on demand. Because Pocket Shell links the Termux
 terminal engine, the app as a whole is distributed under GPLv3. Full attribution in
 `THIRD_PARTY.md`.

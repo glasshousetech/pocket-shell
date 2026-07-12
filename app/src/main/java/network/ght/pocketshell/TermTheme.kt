@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.Context
 import com.termux.terminal.TerminalColors
@@ -45,7 +45,7 @@ object TermThemes {
     // (rather than just "don't call updateWith") so it can be re-selected
     // after trying another theme via the same code path.
     val DEFAULT = TermTheme(
-        id = "default", label = "Railterm (Kali)",
+        id = "default", label = "Pocket Shell (Kali)",
         background = 0x000000, foreground = 0xFFFFFF, cursor = 0xFFFFFF,
         ansi = listOf(
             0x000000, 0xCD0000, 0x00CD00, 0xCDCD00, 0x6495ED, 0xCD00CD, 0x00CDCD, 0xE5E5E5,
@@ -97,7 +97,7 @@ object TermThemes {
 
     fun byId(id: String): TermTheme = ALL.firstOrNull { it.id == id } ?: DEFAULT
 
-    private const val PREFS = "railterm_prefs"
+    private const val PREFS = "pocketshell_prefs"
     private const val KEY_THEME = "terminal_theme"
 
     /** Theme is not secret — plain SharedPreferences, unlike Secrets.kt's API key. */

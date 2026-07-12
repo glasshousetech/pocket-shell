@@ -2,7 +2,7 @@
 <!--
   Overrides com.termux.view's own text_select_handle_left_material (which is
   hardcoded to Android's stock #2196F3 blue) so the text-selection handle
-  matches Railterm's indigo accent (RailAccent, see ui/Theme.kt). Resource
+  matches Pocket Shell's indigo accent (RailAccent, see ui/Theme.kt). Resource
   merging gives the app module priority over the same-named library resource,
   so no library code changes are needed. Geometry is unchanged from upstream.
 -->

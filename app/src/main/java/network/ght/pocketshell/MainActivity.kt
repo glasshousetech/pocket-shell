@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.Manifest
 import android.content.ComponentName
@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.res.ResourcesCompat
-import com.railterm.app.ui.*
+import network.ght.pocketshell.ui.*
 import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
@@ -79,10 +79,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            RailtermTheme {
+            PocketShellTheme {
                 Surface(color = Color.Transparent) {
                     val service = serviceState.value
-                    if (service == null) Splash() else RailtermApp(service)
+                    if (service == null) Splash() else PocketShellApp(service)
                 }
             }
         }
@@ -108,7 +108,7 @@ private fun Splash() {
 }
 
 @Composable
-private fun RailtermApp(service: TermService) {
+private fun PocketShellApp(service: TermService) {
     val configuration = LocalConfiguration.current // recomposes on config change
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current

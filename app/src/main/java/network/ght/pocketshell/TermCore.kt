@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.Context
 import android.util.Log
@@ -131,5 +131,5 @@ class RailSessionClient(
     }
     override fun logStackTrace(tag: String?, e: Exception?) { Log.e(tag ?: TAG, "", e) }
 
-    private companion object { const val TAG = "Railterm" }
+    private companion object { const val TAG = "PocketShell" }
 }

@@ -1,4 +1,4 @@
-package com.railterm.app.ui
+package network.ght.pocketshell.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import com.railterm.app.R
+import network.ght.pocketshell.R
 
 // A real embedded family, not the platform default — three weights give the
 // terminal chrome an actual type scale (output vs. prompt vs. active tab).
@@ -51,7 +51,7 @@ private val RailLightScheme = lightColorScheme(
 )
 
 @Composable
-fun RailtermTheme(content: @Composable () -> Unit) {
+fun PocketShellTheme(content: @Composable () -> Unit) {
     val scheme = if (isSystemInDarkTheme()) RailDarkScheme else RailLightScheme
     MaterialTheme(colorScheme = scheme, content = content)
 }

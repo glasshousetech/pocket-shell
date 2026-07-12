@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +20,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.railterm.app.ui.*
+import network.ght.pocketshell.ui.*
 
 /** The AI copilot bar: natural language -> command, or explain-last-output. */
 @Composable
@@ -142,7 +142,7 @@ fun SettingsDialog(
         ) {
             Text("AI Copilot", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text(
-                "Bring your own Anthropic API key. Free to use — you pay Anthropic directly, nothing goes through Railterm.",
+                "Bring your own Anthropic API key. Free to use — you pay Anthropic directly, nothing goes through Pocket Shell.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
             )
             TextField(

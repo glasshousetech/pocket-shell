@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -23,7 +23,7 @@ object Clip {
 
     fun copy(text: String) {
         if (text.isEmpty()) return
-        manager()?.setPrimaryClip(ClipData.newPlainText("railterm", text))
+        manager()?.setPrimaryClip(ClipData.newPlainText("pocketshell", text))
     }
 
     fun paste(): String =
@@ -92,7 +92,7 @@ class RailViewClient(
     // obvious on a first run.
     override fun copyModeChanged(copyMode: Boolean) {
         if (!copyMode) return
-        val prefs = context.getSharedPreferences("railterm_prefs", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("pocketshell_prefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean(SEEN_SELECTION_HINT, false)) return
         prefs.edit().putBoolean(SEEN_SELECTION_HINT, true).apply()
         Toast.makeText(context, "Selected — drag the handles to adjust, then tap Copy", Toast.LENGTH_LONG).show()
@@ -131,7 +131,7 @@ class RailViewClient(
     override fun logStackTrace(tag: String?, e: Exception?) { Log.e(tag ?: TAG, "", e) }
 
     private companion object {
-        const val TAG = "Railterm"
+        const val TAG = "PocketShell"
         const val SEEN_SELECTION_HINT = "seen_selection_hint"
     }
 }

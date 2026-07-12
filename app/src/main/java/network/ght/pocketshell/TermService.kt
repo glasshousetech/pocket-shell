@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -30,7 +30,7 @@ class TermSession(
 )
 
 /**
- * Foreground service that OWNS the terminal sessions. This is what makes Railterm
+ * Foreground service that OWNS the terminal sessions. This is what makes Pocket Shell
  * a real terminal: shells (and long-running commands) survive the app being
  * backgrounded or the Activity being recreated, because Android won't reap a
  * foreground-service process. A partial wake lock keeps work alive with the
@@ -255,7 +255,7 @@ class TermService : Service() {
         val n = sessions.size
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_terminal)
-            .setContentTitle("Railterm")
+            .setContentTitle("Pocket Shell")
             .setContentText(if (n == 1) "1 session running" else "$n sessions running")
             .setOngoing(true)
             .setShowWhen(false)
@@ -280,7 +280,7 @@ class TermService : Service() {
     private fun acquireWakeLock() {
         if (wakeLock == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "railterm:sessions").apply {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "pocketshell:sessions").apply {
                 setReferenceCounted(false)
                 acquire()
             }
@@ -302,9 +302,9 @@ class TermService : Service() {
     }
 
     companion object {
-        private const val CHANNEL = "railterm_sessions"
+        private const val CHANNEL = "pocketshell_sessions"
         private const val NOTIF_ID = 1001
-        const val ACTION_STOP = "com.railterm.app.STOP"
+        const val ACTION_STOP = "network.ght.pocketshell.STOP"
 
         /** Safety-net cadence; structural changes (new/close tab) also save immediately. */
         private const val SNAPSHOT_INTERVAL_MS = 20_000L

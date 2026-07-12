@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -11,7 +11,7 @@ import androidx.security.crypto.MasterKeys
  * keystore is unavailable so the app never crashes on exotic devices.
  */
 object Secrets {
-    private const val FILE = "railterm_secrets"
+    private const val FILE = "pocketshell_secrets"
     private const val KEY_API = "anthropic_api_key"
     private const val KEY_MODEL = "ai_model"
     private const val KEY_BASE = "ai_base_url"

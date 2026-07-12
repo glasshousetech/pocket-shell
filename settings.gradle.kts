@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Railterm"
+rootProject.name = "Pocket Shell"
 include(":app")

@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,7 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.railterm.app.ui.*
+import network.ght.pocketshell.ui.*
 
 /** Shown before first Linux install: pick which distro to bootstrap. */
 @Composable

@@ -1,4 +1,4 @@
-package com.railterm.app
+package network.ght.pocketshell
 
 import android.content.Context
 import android.os.Build
@@ -153,10 +153,10 @@ object Bootstrap {
                         "https://dl-cdn.alpinelinux.org/alpine/v3.20/community\n"
                 )
                 // A clean prompt + welcome for interactive login shells.
-                File(root, "etc/profile.d/00-railterm.sh").writeText(
+                File(root, "etc/profile.d/00-pocketshell.sh").writeText(
                     "export PS1='alpine:\\w\\$ '\n" +
                         "alias ll='ls -la'\n" +
-                        "[ -f /etc/railterm-welcomed ] || { echo 'Alpine Linux on Railterm. Try: apk add python3 git'; touch /etc/railterm-welcomed; }\n"
+                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Alpine Linux on Pocket Shell. Try: apk add python3 git'; touch /etc/pocketshell-welcomed; }\n"
                 )
             }
 
@@ -165,10 +165,10 @@ object Bootstrap {
                 // /etc/apt/sources.list (archive.ubuntu.com / ports.ubuntu.com,
                 // picked correctly per architecture) — left untouched rather
                 // than guessing at a mirror URL ourselves.
-                File(root, "etc/profile.d/00-railterm.sh").writeText(
+                File(root, "etc/profile.d/00-pocketshell.sh").writeText(
                     "export PS1='ubuntu:\\w\\$ '\n" +
                         "alias ll='ls -la'\n" +
-                        "[ -f /etc/railterm-welcomed ] || { echo 'Ubuntu on Railterm. Try: apt update && apt install -y python3 git'; touch /etc/railterm-welcomed; }\n"
+                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Ubuntu on Pocket Shell. Try: apt update && apt install -y python3 git'; touch /etc/pocketshell-welcomed; }\n"
                 )
             }
         }
