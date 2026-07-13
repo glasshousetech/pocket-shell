@@ -107,8 +107,8 @@ object Userland {
         return env.toTypedArray()
     }
 
-    /** argv that boots an interactive login shell inside [distro]'s rootfs. */
-    fun prootArgs(context: Context, distro: Distro): Array<String> {
+    /** Shared proot argv (bind mounts + guest env) common to interactive and one-shot runs. */
+    private fun baseArgs(context: Context, distro: Distro): Array<String> {
         val root = rootfsDir(context, distro).absolutePath
         val proot = prootBin(context).absolutePath
         return arrayOf(
@@ -127,9 +127,16 @@ object Userland {
             "TERM=xterm-256color",
             "LANG=C.UTF-8",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "/bin/sh", "-l",
         )
     }
+
+    /** argv that boots an interactive login shell inside [distro]'s rootfs. */
+    fun prootArgs(context: Context, distro: Distro): Array<String> =
+        baseArgs(context, distro) + arrayOf("/bin/sh", "-l")
+
+    /** argv that runs [command] non-interactively inside [distro]'s rootfs (no PTY; used for provisioning). */
+    fun prootExecArgs(context: Context, distro: Distro, command: String): Array<String> =
+        baseArgs(context, distro) + arrayOf("/bin/sh", "-c", command)
 
     /** Removes every installed distro's rootfs so the picker starts fresh. */
     fun uninstall(context: Context) {

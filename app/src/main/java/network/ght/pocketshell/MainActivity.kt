@@ -127,6 +127,7 @@ private fun PocketShellApp(service: TermService) {
     var activeIndex by remember { mutableIntStateOf(0) }
     var extraKeysOpen by remember { mutableStateOf(false) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
+    var altMenuOpen by remember { mutableStateOf(false) }
 
     val termViewRef = remember { mutableStateOf<TerminalView?>(null) }
     val viewClient = remember { RailViewClient(ctx, fontPx) }
@@ -222,6 +223,7 @@ private fun PocketShellApp(service: TermService) {
 
     fun sendKey(code: Int) { termViewRef.value?.handleKeyCode(code, 0) }
     fun sendCtrl(cp: Int) { termViewRef.value?.inputCodePoint(cp, true, false); ctrlMenuOpen = false }
+    fun sendAlt(cp: Int) { termViewRef.value?.inputCodePoint(cp, false, true); altMenuOpen = false }
     fun sendLiteral(ch: Char) { termViewRef.value?.inputCodePoint(ch.code, false, false) }
 
     fun terminalText(): String? =
@@ -314,24 +316,30 @@ private fun PocketShellApp(service: TermService) {
 
         if (!hardwareKeyboardAttached) {
             AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
-                if (ctrlMenuOpen) {
-                    CtrlMenu(onKey = { cp -> sendCtrl(cp) })
-                } else {
-                    ExtraKeysRow(
+                when {
+                    ctrlMenuOpen -> CtrlMenu(onKey = { cp -> sendCtrl(cp) }, onBack = { ctrlMenuOpen = false })
+                    altMenuOpen -> AltMenu(onKey = { cp -> sendAlt(cp) }, onBack = { altMenuOpen = false })
+                    else -> ExtraKeysRow(
                         onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
                         onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
                         onCtrl = { ctrlMenuOpen = true },
+                        onAlt = { altMenuOpen = true },
                         onLiteral = { ch -> sendLiteral(ch) },
                         onUp = { sendKey(KeyEvent.KEYCODE_DPAD_UP) },
                         onDown = { sendKey(KeyEvent.KEYCODE_DPAD_DOWN) },
                         onLeft = { sendKey(KeyEvent.KEYCODE_DPAD_LEFT) },
                         onRight = { sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) },
+                        onHome = { sendKey(KeyEvent.KEYCODE_MOVE_HOME) },
+                        onEnd = { sendKey(KeyEvent.KEYCODE_MOVE_END) },
+                        onPgUp = { sendKey(KeyEvent.KEYCODE_PAGE_UP) },
+                        onPgDown = { sendKey(KeyEvent.KEYCODE_PAGE_DOWN) },
+                        onDel = { sendKey(KeyEvent.KEYCODE_FORWARD_DEL) },
                     )
                 }
             }
             ExtraKeysHandle(
                 open = extraKeysOpen,
-                onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false },
+                onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false; altMenuOpen = false },
             )
         }
     }
@@ -547,49 +555,101 @@ private fun SetupOverlay(status: String?, error: String?, onDismiss: () -> Unit)
     }
 }
 
+// Scrollable so every key stays reachable on narrow phones even as the row
+// grows — everything a real shell/ssh session needs, not just the basics:
+// nav (ESC/TAB/arrows/Home/End/PgUp/PgDn/Del), the two modifier menus (CTRL
+// combos double as line-editing shortcuts; ALT combos are readline word-jump),
+// and the punctuation shell commands and ssh flags/paths lean on most
+// (path/pipe separators, flag dash, negation, home-dir tilde, port colon).
 @Composable
 private fun ExtraKeysRow(
     onEsc: () -> Unit,
     onTab: () -> Unit,
     onCtrl: () -> Unit,
+    onAlt: () -> Unit,
     onLiteral: (Char) -> Unit,
     onUp: () -> Unit,
     onDown: () -> Unit,
     onLeft: () -> Unit,
     onRight: () -> Unit,
+    onHome: () -> Unit,
+    onEnd: () -> Unit,
+    onPgUp: () -> Unit,
+    onPgDown: () -> Unit,
+    onDel: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(RailSurfaceAlt)
+            .horizontalScroll(rememberScrollState())
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        KeyChip("ESC", Modifier.weight(1f), onEsc)
-        KeyChip("TAB", Modifier.weight(1f), onTab)
-        KeyChip("CTRL", Modifier.weight(1f), onCtrl)
-        KeyChip("|", Modifier.weight(1f)) { onLiteral('|') }
-        KeyChip("/", Modifier.weight(1f)) { onLiteral('/') }
-        KeyChip("↑", Modifier.weight(1f), onUp)
-        KeyChip("↓", Modifier.weight(1f), onDown)
-        KeyChip("←", Modifier.weight(1f), onLeft)
-        KeyChip("→", Modifier.weight(1f), onRight)
+        KeyChip("ESC", onClick = onEsc)
+        KeyChip("TAB", onClick = onTab)
+        KeyChip("CTRL", onClick = onCtrl)
+        KeyChip("ALT", onClick = onAlt)
+        KeyChip("←", onClick = onLeft)
+        KeyChip("↓", onClick = onDown)
+        KeyChip("↑", onClick = onUp)
+        KeyChip("→", onClick = onRight)
+        KeyChip("HOME", onClick = onHome)
+        KeyChip("END", onClick = onEnd)
+        KeyChip("PGUP", onClick = onPgUp)
+        KeyChip("PGDN", onClick = onPgDown)
+        KeyChip("DEL", onClick = onDel)
+        KeyChip("-") { onLiteral('-') }
+        KeyChip("_") { onLiteral('_') }
+        KeyChip("~") { onLiteral('~') }
+        KeyChip("/") { onLiteral('/') }
+        KeyChip("|") { onLiteral('|') }
+        KeyChip(":") { onLiteral(':') }
+        KeyChip(".") { onLiteral('.') }
+        KeyChip("*") { onLiteral('*') }
+        KeyChip("=") { onLiteral('=') }
+        KeyChip("\"") { onLiteral('"') }
+        KeyChip("'") { onLiteral('\'') }
+        KeyChip("$") { onLiteral('$') }
     }
 }
 
 @Composable
-private fun CtrlMenu(onKey: (Int) -> Unit) {
-    val combos = listOf("C" to 'c', "D" to 'd', "Z" to 'z', "L" to 'l', "A" to 'a', "E" to 'e', "R" to 'r')
+private fun CtrlMenu(onKey: (Int) -> Unit, onBack: () -> Unit) {
+    // C/D/Z = interrupt/EOF/suspend; L = clear; A/E = line start/end;
+    // U/K/W = kill-to-start/kill-to-end/kill-word (readline line editing).
+    val combos = listOf(
+        "C" to 'c', "D" to 'd', "Z" to 'z', "L" to 'l',
+        "A" to 'a', "E" to 'e', "U" to 'u', "K" to 'k', "W" to 'w', "R" to 'r',
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(RailSurfaceAlt)
+            .horizontalScroll(rememberScrollState())
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        combos.forEach { (letter, ch) ->
-            KeyChip("^$letter", Modifier.weight(1f)) { onKey(ch.code) }
-        }
+        KeyChip("←", onClick = onBack)
+        combos.forEach { (letter, ch) -> KeyChip("^$letter") { onKey(ch.code) } }
+    }
+}
+
+@Composable
+private fun AltMenu(onKey: (Int) -> Unit, onBack: () -> Unit) {
+    // B/F = jump back/forward a word; D = delete word forward; . = last arg
+    // of the previous command — all standard bash/zsh readline alt-combos.
+    val combos = listOf("B" to 'b', "F" to 'f', "D" to 'd', "." to '.')
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(RailSurfaceAlt)
+            .horizontalScroll(rememberScrollState())
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        KeyChip("←", onClick = onBack)
+        combos.forEach { (label, ch) -> KeyChip("M-$label") { onKey(ch.code) } }
     }
 }
 
@@ -600,7 +660,7 @@ private fun KeyChip(label: String, modifier: Modifier = Modifier, onClick: () ->
             .clip(RoundedCornerShape(6.dp))
             .background(RailKeyChip)
             .clickable(onClick = onClick)
-            .padding(vertical = 9.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 11.sp)

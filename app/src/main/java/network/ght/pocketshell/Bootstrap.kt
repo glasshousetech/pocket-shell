@@ -54,6 +54,14 @@ object Bootstrap {
                 onStatus("Configuring…")
                 configure(root, distro)
 
+                // Best-effort: preinstall ssh/git/python so the terminal is
+                // immediately useful (e.g. sshing to a droplet) without a manual
+                // `apk add`/`apt install` first. Never fails the whole install —
+                // a flaky network here still leaves a good, usable rootfs; the
+                // welcome message covers the manual fallback.
+                onStatus("Installing ssh, git, python…")
+                runCatching { provision(context, distro) }
+
                 val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
                 Userland.installedMarker(context, distro).writeText("${distro.id} $version\n")
                 Result.success(Unit)
@@ -137,6 +145,32 @@ object Bootstrap {
         }
     }
 
+    /** Runs a one-shot, non-interactive provisioning command inside the fresh rootfs via proot. */
+    private fun provision(context: Context, distro: Distro) {
+        val command = when (distro) {
+            Distro.Alpine -> "apk update && apk add --no-cache openssh-client python3 git ca-certificates"
+            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive && apt-get update && " +
+                "apt-get install -y --no-install-recommends openssh-client python3 git ca-certificates && " +
+                "rm -rf /var/lib/apt/lists/*"
+        }
+        val pb = ProcessBuilder(*Userland.prootExecArgs(context, distro, command))
+        pb.environment().clear()
+        Userland.prootEnv(context).forEach { kv ->
+            val (k, v) = kv.split("=", limit = 2)
+            pb.environment()[k] = v
+        }
+        pb.redirectErrorStream(true)
+        val proc = pb.start()
+        val output = proc.inputStream.bufferedReader().readText()
+        if (!proc.waitFor(180, java.util.concurrent.TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            throw IllegalStateException("Provisioning timed out")
+        }
+        if (proc.exitValue() != 0) {
+            throw IllegalStateException("Provisioning exited ${proc.exitValue()}: ${output.take(500)}")
+        }
+    }
+
     /** Minimal working network + package config inside the guest. */
     private fun configure(root: File, distro: Distro) {
         File(root, "etc").mkdirs()
@@ -156,7 +190,7 @@ object Bootstrap {
                 File(root, "etc/profile.d/00-pocketshell.sh").writeText(
                     "export PS1='alpine:\\w\\$ '\n" +
                         "alias ll='ls -la'\n" +
-                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Alpine Linux on Pocket Shell. Try: apk add python3 git'; touch /etc/pocketshell-welcomed; }\n"
+                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Alpine Linux on Pocket Shell. ssh/git/python are ready — try: ssh user@host'; touch /etc/pocketshell-welcomed; }\n"
                 )
             }
 
@@ -168,7 +202,7 @@ object Bootstrap {
                 File(root, "etc/profile.d/00-pocketshell.sh").writeText(
                     "export PS1='ubuntu:\\w\\$ '\n" +
                         "alias ll='ls -la'\n" +
-                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Ubuntu on Pocket Shell. Try: apt update && apt install -y python3 git'; touch /etc/pocketshell-welcomed; }\n"
+                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Ubuntu on Pocket Shell. ssh/git/python are ready — try: ssh user@host'; touch /etc/pocketshell-welcomed; }\n"
                 )
             }
         }
