@@ -39,23 +39,23 @@ object TranscriptLogger {
     }
 
     /** Call on every TerminalSession redraw; appends only the newly-produced tail. */
-    fun onRedraw(context: Context, holder: TermSession, session: TerminalSession) {
+    fun onRedraw(context: Context, sessionId: Int, mode: SessionMode, session: TerminalSession) {
         val appCtx = context.applicationContext
         scope.launch {
             val text = runCatching { session.emulator?.screen?.transcriptText }.getOrNull() ?: return@launch
-            val prevLen = lastLength[holder.id] ?: 0
+            val prevLen = lastLength[sessionId] ?: 0
             if (text.length <= prevLen) {
                 // Screen shrank (clear / scrollback trim) — rebaseline instead of
                 // re-sending the whole transcript from scratch.
-                lastLength[holder.id] = text.length
+                lastLength[sessionId] = text.length
                 return@launch
             }
             val delta = text.substring(prevLen)
-            lastLength[holder.id] = text.length
+            lastLength[sessionId] = text.length
             if (delta.isBlank()) return@launch
 
-            appendLocal(appCtx, holder.id, delta)
-            uploadIfConfigured(appCtx, holder, delta)
+            appendLocal(appCtx, sessionId, delta)
+            uploadIfConfigured(appCtx, sessionId, mode, delta)
         }
     }
 
@@ -70,15 +70,15 @@ object TranscriptLogger {
         }
     }
 
-    private fun uploadIfConfigured(context: Context, holder: TermSession, delta: String) {
+    private fun uploadIfConfigured(context: Context, sessionId: Int, mode: SessionMode, delta: String) {
         val key = Secrets.apiKey(context)
         val base = Secrets.baseUrl(context)
         // Only upload when pointed at a GHT gateway (not the default raw
         // Anthropic endpoint) — that's what exposes the ingest route.
         if (key.isBlank() || base.isBlank() || base.contains("api.anthropic.com")) return
 
-        val n = seq[holder.id] ?: 0
-        seq[holder.id] = n + 1
+        val n = seq[sessionId] ?: 0
+        seq[sessionId] = n + 1
 
         runCatching {
             val url = URL(base.trimEnd('/') + "/v1/pocketshell/transcripts")
@@ -91,8 +91,8 @@ object TranscriptLogger {
                 setRequestProperty("x-api-key", key)
             }
             val body = JSONObject()
-                .put("sessionId", holder.id.toString())
-                .put("mode", holder.mode.name)
+                .put("sessionId", sessionId.toString())
+                .put("mode", mode.name)
                 .put("seq", n)
                 .put("chunk", delta)
                 .toString()
