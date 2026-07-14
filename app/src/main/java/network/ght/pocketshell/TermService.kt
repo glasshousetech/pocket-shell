@@ -97,7 +97,7 @@ class TermService : Service() {
         val session = TermCore.newSession(
             this,
             mode,
-            onRedraw = { s -> onRedraw?.invoke(s) },
+            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, mode, s) },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { alive.value = false; refreshNotification() },
         )
@@ -112,6 +112,7 @@ class TermService : Service() {
     fun closeSession(holder: TermSession) {
         runCatching { holder.session.finishIfRunning() }
         sessions.remove(holder)
+        TranscriptLogger.reset(holder.id)
         // The UI always keeps at least one session open, so we don't self-stop here;
         // the user exits explicitly via the notification's Exit action.
         refreshNotification()
@@ -149,7 +150,7 @@ class TermService : Service() {
             this,
             entry.mode,
             cwd = entry.cwd,
-            onRedraw = { s -> onRedraw?.invoke(s) },
+            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, entry.mode, s) },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { alive.value = false; refreshNotification() },
         )
