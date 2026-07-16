@@ -15,6 +15,7 @@ object Secrets {
     private const val KEY_API = "anthropic_api_key"
     private const val KEY_MODEL = "ai_model"
     private const val KEY_BASE = "ai_base_url"
+    private const val KEY_TRANSCRIPTS = "transcript_logging_enabled"
 
     /** Default per the Claude API guidance: highest-quality model unless changed. */
     const val DEFAULT_MODEL = "claude-opus-4-8"
@@ -58,5 +59,12 @@ object Secrets {
         prefs(context).getString(KEY_BASE, DEFAULT_BASE)?.ifBlank { DEFAULT_BASE } ?: DEFAULT_BASE
     fun setBaseUrl(context: Context, value: String) {
         prefs(context).edit().putString(KEY_BASE, value.trim().ifBlank { DEFAULT_BASE }).apply()
+    }
+
+    /** Off by default — transcripts can contain passwords/keys typed at the prompt. */
+    fun transcriptLoggingEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_TRANSCRIPTS, false)
+    fun setTranscriptLoggingEnabled(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_TRANSCRIPTS, value).apply()
     }
 }

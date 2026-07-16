@@ -13,11 +13,17 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 
 /**
- * Captures every session's terminal transcript (commands + output, taken from
- * the emulator's own scrollback) so a session can be debugged after the fact:
- * always written to a local rotating log file, and also batched to
+ * Opt-in capture of a session's terminal transcript (commands + output, taken
+ * from the emulator's own scrollback) so a session can be debugged after the
+ * fact: written to a local rotating log file, and also batched to
  * POST /v1/pocketshell/transcripts on the configured gateway when a staff
  * proxy key is set and the endpoint isn't the default raw Anthropic one.
+ *
+ * Off by default (see [Secrets.transcriptLoggingEnabled]) — transcripts can
+ * contain passwords, API keys, or other sensitive output typed at the prompt.
+ * The log directory lives in [Context.getNoBackupFilesDir], same as
+ * [SessionStore]'s scrollback snapshots, so it's excluded from Android's
+ * cloud backup even while a user has logging turned on.
  *
  * TESTING ONLY: the gateway route this posts to is not live in production
  * yet, so uploads currently just fail silently — local logging still works
@@ -29,7 +35,7 @@ object TranscriptLogger {
     private val seq = mutableMapOf<Int, Int>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private fun logDir(context: Context): File = File(context.filesDir, "transcripts").apply { mkdirs() }
+    private fun logDir(context: Context): File = File(context.noBackupFilesDir, "transcripts").apply { mkdirs() }
     private fun logFile(context: Context, sessionId: Int): File = File(logDir(context), "session-$sessionId.log")
 
     /** Call when a session is closed so a reused id starts a clean baseline. */
@@ -41,6 +47,7 @@ object TranscriptLogger {
     /** Call on every TerminalSession redraw; appends only the newly-produced tail. */
     fun onRedraw(context: Context, sessionId: Int, mode: SessionMode, session: TerminalSession) {
         val appCtx = context.applicationContext
+        if (!Secrets.transcriptLoggingEnabled(appCtx)) return
         scope.launch {
             val text = runCatching { session.emulator?.screen?.transcriptText }.getOrNull() ?: return@launch
             val prevLen = lastLength[sessionId] ?: 0
