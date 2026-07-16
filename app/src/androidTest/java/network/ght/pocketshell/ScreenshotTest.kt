@@ -27,8 +27,12 @@ class ScreenshotTest {
     fun captureAppScreens() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
-        val outDir = File(instrumentation.targetContext.getExternalFilesDir(null), "screenshots")
-            .apply { mkdirs() }
+        // filesDir (app-private internal storage) is always non-null, unlike
+        // getExternalFilesDir(null) which returned null on this AVD image and
+        // silently wrote screenshots nowhere useful. Pulled off-device via
+        // `adb shell run-as` in the CI job rather than a plain `adb pull`,
+        // since this isn't externally-accessible storage.
+        val outDir = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
         var shot = 0
         fun capture(name: String) {
             shot++

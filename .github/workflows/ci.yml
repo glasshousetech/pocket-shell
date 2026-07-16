@@ -138,8 +138,14 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.ScreenshotTest --no-daemon --stacktrace
+            # Screenshots land in the app's private storage (filesDir), which a
+            # plain `adb pull` can't read directly — tar them up as the app's
+            # own uid via run-as, drop the tarball somewhere world-readable,
+            # then pull and extract that instead.
+            adb shell run-as network.ght.pocketshell sh -c 'cd /data/data/network.ght.pocketshell/files && tar cf /data/local/tmp/screenshots.tar screenshots'
             mkdir -p app/build/outputs/screenshots
-            adb pull /sdcard/Android/data/network.ght.pocketshell/files/screenshots app/build/outputs/screenshots
+            adb pull /data/local/tmp/screenshots.tar app/build/outputs/screenshots.tar
+            tar xf app/build/outputs/screenshots.tar -C app/build/outputs/screenshots
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
