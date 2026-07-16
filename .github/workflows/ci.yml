@@ -137,17 +137,22 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.ScreenshotTest --no-daemon --stacktrace
-            echo "==> installed packages:"
-            adb shell pm list packages | grep pocketshell || echo "(none matched)"
-            # Screenshots land in the app's private storage (filesDir), which a
-            # plain `adb pull` can't read directly — tar them up as the app's
-            # own uid via run-as, drop the tarball somewhere world-readable,
-            # then pull and extract that instead.
+            # Not using `gradlew connectedDebugAndroidTest` here: AGP's task
+            # uninstalls both APKs the instant the test run finishes, which
+            # raced out any attempt to pull files off the device afterward
+            # ("run-as: unknown package"). Installing and driving the
+            # instrumentation manually keeps the app installed until we're
+            # done pulling.
+            ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -e class network.ght.pocketshell.ScreenshotTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
             adb shell run-as network.ght.pocketshell sh -c 'cd /data/data/network.ght.pocketshell/files && tar cf /data/local/tmp/screenshots.tar screenshots'
             mkdir -p app/build/outputs/screenshots
             adb pull /data/local/tmp/screenshots.tar app/build/outputs/screenshots.tar
             tar xf app/build/outputs/screenshots.tar -C app/build/outputs/screenshots
+            ls -la app/build/outputs/screenshots
+            grep -q "OK (1 test)" instrument-output.txt
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
