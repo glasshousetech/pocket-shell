@@ -138,6 +138,8 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.ScreenshotTest --no-daemon --stacktrace
+            echo "==> installed packages:"
+            adb shell pm list packages | grep pocketshell || echo "(none matched)"
             # Screenshots land in the app's private storage (filesDir), which a
             # plain `adb pull` can't read directly — tar them up as the app's
             # own uid via run-as, drop the tarball somewhere world-readable,
