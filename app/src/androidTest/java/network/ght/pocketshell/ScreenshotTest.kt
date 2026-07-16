@@ -1,6 +1,7 @@
 package network.ght.pocketshell
 
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -33,13 +34,18 @@ class ScreenshotTest {
         // `adb shell run-as` in the CI job rather than a plain `adb pull`,
         // since this isn't externally-accessible storage.
         val outDir = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+        Log.i(TAG, "outDir=${outDir.absolutePath} exists=${outDir.exists()} canWrite=${outDir.canWrite()}")
         var shot = 0
         fun capture(name: String) {
             shot++
-            val bitmap: Bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return
-            FileOutputStream(File(outDir, "%02d_%s.png".format(shot, name))).use {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            val bitmap: Bitmap? = instrumentation.uiAutomation.takeScreenshot()
+            if (bitmap == null) {
+                Log.w(TAG, "takeScreenshot() returned null for $name")
+                return
             }
+            val file = File(outDir, "%02d_%s.png".format(shot, name))
+            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            Log.i(TAG, "wrote ${file.absolutePath} (${file.length()} bytes)")
         }
 
         ActivityScenario.launch(MainActivity::class.java).use {
@@ -80,5 +86,11 @@ class ScreenshotTest {
             capture("linux_distro_picker")
             device.pressBack()
         }
+
+        Log.i(TAG, "final dir listing: ${outDir.listFiles()?.joinToString { it.name }}")
+    }
+
+    private companion object {
+        const val TAG = "PocketShellScreenshotTest"
     }
 }

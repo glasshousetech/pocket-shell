@@ -147,6 +147,10 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -e class network.ght.pocketshell.ScreenshotTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            echo "==> PocketShellScreenshotTest logcat:"
+            adb logcat -d -s PocketShellScreenshotTest:* || true
+            echo "==> run-as visible files dir:"
+            adb shell run-as network.ght.pocketshell ls -la /data/data/network.ght.pocketshell/files/ || true
             adb shell run-as network.ght.pocketshell sh -c 'cd /data/data/network.ght.pocketshell/files && tar cf /data/local/tmp/screenshots.tar screenshots'
             mkdir -p app/build/outputs/screenshots
             adb pull /data/local/tmp/screenshots.tar app/build/outputs/screenshots.tar
