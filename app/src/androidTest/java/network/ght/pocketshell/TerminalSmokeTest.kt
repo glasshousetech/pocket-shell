@@ -26,16 +26,27 @@ class TerminalSmokeTest {
 
     @Test
     fun basicCommandRoundTripsThroughTermService() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
         val binder = serviceRule.bindService(Intent(context, TermService::class.java))
         val service = (binder as TermService.LocalBinder).service
 
-        val holder = service.newSession(SessionMode.SYSTEM)
-        holder.session.updateSize(80, 24)
+        // TermService (like any Service) expects to be driven from the main
+        // thread — spawning/writing/closing sessions from the test's own
+        // instrumentation thread hits "Can't create handler inside thread
+        // ... that has not called Looper.prepare()" deep in the terminal
+        // engine, so those calls are dispatched onto the main thread here.
+        val holderRef = arrayOfNulls<TermSession>(1)
+        instrumentation.runOnMainSync {
+            val holder = service.newSession(SessionMode.SYSTEM)
+            holder.session.updateSize(80, 24)
+            holderRef[0] = holder
+        }
+        val holder = holderRef[0]!!
 
         val sentinel = "POCKETSHELL_SMOKE_${System.nanoTime()}"
         Thread.sleep(500) // let the shell finish starting before writing
-        holder.session.write("echo $sentinel\n")
+        instrumentation.runOnMainSync { holder.session.write("echo $sentinel\n") }
 
         val deadline = System.currentTimeMillis() + 8_000
         var found = false
@@ -45,7 +56,7 @@ class TerminalSmokeTest {
             if (!found) Thread.sleep(150)
         }
 
-        service.closeSession(holder)
+        instrumentation.runOnMainSync { service.closeSession(holder) }
         assertTrue("Expected '$sentinel' to round-trip through a real shell session", found)
     }
 }
