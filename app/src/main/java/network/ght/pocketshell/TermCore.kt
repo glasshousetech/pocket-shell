@@ -46,7 +46,11 @@ object TermCore {
         onFinished: (TerminalSession) -> Unit,
     ): TerminalSession {
         val client = RailSessionClient(onRedraw, onTitle, onFinished)
-        val home = context.filesDir.absolutePath
+        // A dedicated subdir, not the raw files dir root — the latter also holds
+        // session-store JSON, caches, and extracted native libs, which made `ls`
+        // in a fresh SYSTEM shell look like broken app internals instead of an
+        // empty home directory.
+        val home = File(context.filesDir, "home").apply { mkdirs() }.absolutePath
 
         return when (mode) {
             SessionMode.LINUX -> {

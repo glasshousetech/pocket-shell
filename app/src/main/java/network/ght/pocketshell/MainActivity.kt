@@ -162,10 +162,18 @@ private fun PocketShellApp(service: TermService) {
         }
     }
 
+    // Prefer the installed Linux distro over the bare Android shell whenever we
+    // have to conjure a session with no other signal to go on (cold start, or
+    // "always keep one tab open" after closing the last one) — SYSTEM's PATH is
+    // just /system/bin, so a user who already installed Alpine/Ubuntu should
+    // land in the real userland, not the crippled toybox shell, by default.
+    fun defaultMode(): SessionMode =
+        if (Userland.installedDistro(ctx) != null) SessionMode.LINUX else SessionMode.SYSTEM
+
     fun closeSession(index: Int) {
         val holder = sessions.getOrNull(index) ?: return
         service.closeSession(holder)
-        if (sessions.isEmpty()) { addSession(SessionMode.SYSTEM); return }
+        if (sessions.isEmpty()) { addSession(defaultMode()); return }
         activeIndex = activeIndex.coerceIn(0, sessions.size - 1)
         termViewRef.value?.let {
             it.attachSession(sessions[activeIndex].session)
@@ -212,7 +220,7 @@ private fun PocketShellApp(service: TermService) {
         themeOpen = false
     }
 
-    LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession(SessionMode.SYSTEM) }
+    LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession(defaultMode()) }
     if (sessions.isEmpty()) return
 
     val active = sessions[activeIndex.coerceIn(0, sessions.size - 1)]
