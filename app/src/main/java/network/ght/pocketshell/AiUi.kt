@@ -145,6 +145,7 @@ fun SettingsDialog(
     var transcriptLogging by remember { mutableStateOf(Secrets.transcriptLoggingEnabled(ctx)) }
     var lastCrash by remember { mutableStateOf(CrashHandler.lastCrash(ctx)) }
     var updateState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
+    var storageGranted by remember { mutableStateOf(StorageAccess.isGranted(ctx)) }
 
     fun checkForUpdates() {
         updateState = UpdateCheckState.Checking
@@ -169,7 +170,23 @@ fun SettingsDialog(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("AI Copilot", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("Pocket Shell Settings", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+
+            Text("Phone storage", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(
+                if (storageGranted) "Connected. Shared files are available in Linux at /sdcard."
+                else "Enable direct access so git, editors, rsync, and scripts can work with Downloads and Documents at /sdcard.",
+                color = if (storageGranted) RailAccent else RailDimText,
+                fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
+            )
+            AiChip(if (storageGranted) "Storage access enabled" else "Enable phone storage", {
+                runCatching { ctx.startActivity(StorageAccess.settingsIntent(ctx)) }
+                storageGranted = StorageAccess.isGranted(ctx)
+            }, Modifier.fillMaxWidth(), accent = !storageGranted)
+
+            SettingsDivider()
+
+            Text("AI Copilot", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text(
                 "Bring your own Anthropic API key. Free to use — you pay Anthropic directly, nothing goes through Pocket Shell.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,

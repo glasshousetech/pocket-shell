@@ -15,6 +15,11 @@ frosted-glass look. The goal is a terminal that feels like a native app, not a
 - **On-screen extra keys** — ESC / TAB / CTRL / arrows / pipe / slash, plus a
   Ctrl-combo pad (^C ^D ^Z ^L ^A ^E ^R), because phones don't have those keys.
 - **Pinch to zoom** the font, sticky modifiers, copy/paste — the ergonomics you expect.
+- **One-tap remote workspaces** — Connect opens `agent.ght.network` or a saved
+  SSH host inside a named tmux session, so a mobile-network drop does not kill
+  the running agent CLI.
+- **Verified first run** — Ubuntu is recommended and Pocket Shell will not call
+  setup complete until Bash, OpenSSH, and tmux execute inside the userland.
 
 ## Architecture
 
@@ -64,8 +69,10 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
       Dark. Tap the 🎨 tab; persisted across restarts. See `TermTheme.kt` /
       `ThemeUi.kt`.
 - [x] Session persistence across process death (best-effort scrollback replay; see `SessionStore.kt`)
-- [ ] Configurable extra-keys row
-- [ ] Background install progress bar polish (currently a blocking overlay)
+- [x] SSH connection workspace with saved custom host and tmux reconnect
+- [x] Bounded, recoverable provisioning with mandatory SSH health verification
+- [x] Secure SSH private-key import through Android's document picker
+- [ ] Configurable extra-keys layouts
 
 ## License
 

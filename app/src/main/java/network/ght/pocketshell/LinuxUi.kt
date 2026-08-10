@@ -32,14 +32,14 @@ fun DistroPickerDialog(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Choose a Linux distro", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("Set up Pocket Shell", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text(
-                "One-time download, sha256-verified. You can uninstall and pick again later (long-press the 🐧 tab).",
+                "Ubuntu is recommended for SSH and agent CLI compatibility. Setup downloads a sha256-verified base, installs SSH + tmux, and verifies both before it can finish.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
             )
             Distro.ALL.forEach { distro ->
                 val available = Userland.isAvailable(ctx, distro)
-                DistroRow(distro, available, onClick = { if (available) onPick(distro) })
+                DistroRow(distro, available, recommended = distro == Distro.Ubuntu, onClick = { if (available) onPick(distro) })
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
                 TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
@@ -49,7 +49,7 @@ fun DistroPickerDialog(
 }
 
 @Composable
-private fun DistroRow(distro: Distro, available: Boolean, onClick: () -> Unit) {
+private fun DistroRow(distro: Distro, available: Boolean, recommended: Boolean, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -68,8 +68,7 @@ private fun DistroRow(distro: Distro, available: Boolean, onClick: () -> Unit) {
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f),
             )
-            val pkgTool = if (distro == Distro.Alpine) "apk" else "apt"
-            Text(pkgTool, color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
+            Text(if (recommended) "RECOMMENDED" else "LIGHTWEIGHT", color = if (recommended) RailAccent else RailAccentDim, fontFamily = RailMono, fontSize = 9.sp, fontWeight = FontWeight.Bold)
         }
         if (!available) {
             Text(

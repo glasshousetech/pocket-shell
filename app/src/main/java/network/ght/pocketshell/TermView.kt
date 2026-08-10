@@ -64,6 +64,13 @@ class RailViewClient(
         imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
     }
 
+    fun hideKeyboard() {
+        val v = view ?: return
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(v.windowToken, 0)
+        v.clearFocus()
+    }
+
     override fun onScale(scale: Float): Float {
         // Pinch outside a small dead-zone re-sizes the font, Termux-style.
         if (scale < 0.9f || scale > 1.1f) {

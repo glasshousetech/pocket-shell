@@ -11,6 +11,15 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Pocket Shell is distributed directly, not through Play. Full shared
+         storage access is what lets arbitrary CLI tools work on Downloads,
+         Documents, Git checkouts, and USB/SD storage by direct path. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+
     <application
         android:name=".PocketShellApp"
         android:allowBackup="true"

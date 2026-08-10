@@ -15,6 +15,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * Installs a Linux userland: download (sha256-pinned) -> extract -> configure.
@@ -54,22 +55,45 @@ object Bootstrap {
                 onStatus("Configuring…")
                 configure(root, distro)
 
-                // Best-effort: preinstall ssh/git/python so the terminal is
-                // immediately useful (e.g. sshing to a droplet) without a manual
-                // `apk add`/`apt install` first. Never fails the whole install —
-                // a flaky network here still leaves a good, usable rootfs; the
-                // welcome message covers the manual fallback.
-                onStatus("Installing ssh, git, python…")
-                runCatching { provision(context, distro) }
+                // SSH is the product's primary workflow, not an optional extra.
+                // Do not mark a rootfs ready unless the core shell and ssh
+                // client were installed and actually execute successfully.
+                onStatus("Installing secure shell…")
+                provisionCore(context, distro)
+                onStatus("Installing developer toolkit…")
+                runCatching { provisionToolkit(context, distro) }
+
+                onStatus("Verifying terminal and SSH…")
+                verifyCore(context, distro)
 
                 val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
-                Userland.installedMarker(context, distro).writeText("${distro.id} $version\n")
+                Userland.installedMarker(context, distro).writeText("${distro.id} $version schema=${Userland.SETUP_SCHEMA}\n")
                 Result.success(Unit)
             } catch (t: Throwable) {
                 runCatching { root.deleteRecursively() }
                 Result.failure(t)
             }
         }
+
+    /** Upgrades an older/broken rootfs in place without deleting keys or home data. */
+    suspend fun repair(context: Context, distro: Distro, onStatus: (String) -> Unit): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                require(rootfsDirExists(context, distro)) { "Linux is not installed." }
+                onStatus("Repairing SSH and shell…")
+                configure(Userland.rootfsDir(context, distro), distro)
+                provisionCore(context, distro)
+                onStatus("Refreshing developer toolkit…")
+                runCatching { provisionToolkit(context, distro) }
+                onStatus("Running health check…")
+                verifyCore(context, distro)
+                val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
+                Userland.installedMarker(context, distro).writeText("${distro.id} $version schema=${Userland.SETUP_SCHEMA}\n")
+            }
+        }
+
+    private fun rootfsDirExists(context: Context, distro: Distro): Boolean =
+        File(Userland.rootfsDir(context, distro), "bin/sh").exists()
 
     /** Streams [url] to [dest] while computing its SHA-256; returns the hex digest. */
     private fun download(url: String, dest: File, onProgress: (Int) -> Unit): String {
@@ -145,14 +169,29 @@ object Bootstrap {
         }
     }
 
-    /** Runs a one-shot, non-interactive provisioning command inside the fresh rootfs via proot. */
-    private fun provision(context: Context, distro: Distro) {
+    private fun provisionCore(context: Context, distro: Distro) {
         val command = when (distro) {
-            Distro.Alpine -> "apk update && apk add --no-cache openssh-client python3 git ca-certificates"
+            Distro.Alpine -> "apk update && apk add --no-cache bash openssh-client ca-certificates curl tmux"
             Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive && apt-get update && " +
-                "apt-get install -y --no-install-recommends openssh-client python3 git ca-certificates && " +
-                "rm -rf /var/lib/apt/lists/*"
+                "apt-get install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
         }
+        runGuest(context, distro, command, 240)
+    }
+
+    private fun provisionToolkit(context: Context, distro: Distro) {
+        val command = when (distro) {
+            Distro.Alpine -> "apk add --no-cache python3 py3-pip git github-cli wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less nodejs npm build-base || true"
+            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive && apt-get install -y --no-install-recommends python3 python3-pip git wget vim nano jq rsync zip unzip less nodejs npm build-essential || true; rm -rf /var/lib/apt/lists/*"
+        }
+        runGuest(context, distro, command, 300)
+    }
+
+    private fun verifyCore(context: Context, distro: Distro) {
+        runGuest(context, distro, "bash --version >/dev/null && ssh -V && tmux -V", 30)
+    }
+
+    /** Runs a bounded guest command and drains output without defeating the timeout. */
+    private fun runGuest(context: Context, distro: Distro, command: String, timeoutSeconds: Long): String {
         val pb = ProcessBuilder(*Userland.prootExecArgs(context, distro, command))
         pb.environment().clear()
         Userland.prootEnv(context).forEach { kv ->
@@ -161,14 +200,22 @@ object Bootstrap {
         }
         pb.redirectErrorStream(true)
         val proc = pb.start()
-        val output = proc.inputStream.bufferedReader().readText()
-        if (!proc.waitFor(180, java.util.concurrent.TimeUnit.SECONDS)) {
+        val output = StringBuilder()
+        val reader = Thread {
+            proc.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { line -> if (output.length < 16_000) output.appendLine(line) }
+            }
+        }.apply { isDaemon = true; start() }
+        if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
-            throw IllegalStateException("Provisioning timed out")
+            reader.join(2_000)
+            throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
         }
+        reader.join(2_000)
         if (proc.exitValue() != 0) {
-            throw IllegalStateException("Provisioning exited ${proc.exitValue()}: ${output.take(500)}")
+            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.takeLast(1_000)}")
         }
+        return output.toString()
     }
 
     /** Minimal working network + package config inside the guest. */
@@ -178,6 +225,12 @@ object Bootstrap {
         File(root, "etc/resolv.conf").writeText("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
         File(root, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost\n")
         File(root, "etc/profile.d").mkdirs()
+        File(root, "root/.ssh").apply { mkdirs(); Os.chmod(absolutePath, 448) }
+        File(root, "root/.ssh/config").writeText(
+            "Host *\n  ServerAliveInterval 30\n  ServerAliveCountMax 3\n" +
+                "  TCPKeepAlive yes\n  AddKeysToAgent yes\n  IdentitiesOnly no\n"
+        )
+        Os.chmod(File(root, "root/.ssh/config").absolutePath, 384)
 
         when (distro) {
             Distro.Alpine -> {
@@ -188,9 +241,11 @@ object Bootstrap {
                 )
                 // A clean prompt + welcome for interactive login shells.
                 File(root, "etc/profile.d/00-pocketshell.sh").writeText(
-                    "export PS1='alpine:\\w\\$ '\n" +
+                    "export PS1='pocket:\\w\\$ '\n" +
                         "alias ll='ls -la'\n" +
-                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Alpine Linux on Pocket Shell. ssh/git/python are ready — try: ssh user@host'; touch /etc/pocketshell-welcomed; }\n"
+                        "alias cls='clear'\n" +
+                        "[ -d /sdcard ] && alias downloads='cd /sdcard/Download'\n" +
+                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Pocket Shell is ready. Tap Connect for a one-touch SSH + tmux workspace.'; echo 'Shared phone files appear at /sdcard after enabling Storage in Settings.'; touch /etc/pocketshell-welcomed; }\n"
                 )
             }
 
@@ -200,9 +255,11 @@ object Bootstrap {
                 // picked correctly per architecture) — left untouched rather
                 // than guessing at a mirror URL ourselves.
                 File(root, "etc/profile.d/00-pocketshell.sh").writeText(
-                    "export PS1='ubuntu:\\w\\$ '\n" +
+                    "export PS1='pocket:\\w\\$ '\n" +
                         "alias ll='ls -la'\n" +
-                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Ubuntu on Pocket Shell. ssh/git/python are ready — try: ssh user@host'; touch /etc/pocketshell-welcomed; }\n"
+                        "alias cls='clear'\n" +
+                        "[ -d /sdcard ] && alias downloads='cd /sdcard/Download'\n" +
+                        "[ -f /etc/pocketshell-welcomed ] || { echo 'Pocket Shell is ready. Tap Connect for a one-touch SSH + tmux workspace.'; echo 'Shared phone files appear at /sdcard after enabling Storage in Settings.'; touch /etc/pocketshell-welcomed; }\n"
                 )
             }
         }

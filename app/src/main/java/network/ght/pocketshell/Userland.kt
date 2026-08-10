@@ -13,7 +13,9 @@ sealed class Distro(val id: String, val label: String, val dirName: String) {
     object Ubuntu : Distro("ubuntu", "Ubuntu", "ubuntu")
 
     companion object {
-        val ALL: List<Distro> = listOf(Alpine, Ubuntu)
+        // Ubuntu is the daily-driver default: glibc and Debian packaging match
+        // the supported environment expected by agent CLIs and most dev tools.
+        val ALL: List<Distro> = listOf(Ubuntu, Alpine)
         fun byId(id: String): Distro? = ALL.firstOrNull { it.id == id }
     }
 }
@@ -30,6 +32,7 @@ object Userland {
 
     const val ALPINE_VERSION = "3.20.10"
     const val UBUNTU_VERSION = "24.04.4"
+    const val SETUP_SCHEMA = 2
 
     data class Rootfs(val url: String, val sha256: String)
 
@@ -77,6 +80,8 @@ object Userland {
     fun rootfsDir(context: Context, distro: Distro): File = File(context.filesDir, distro.dirName)
     fun installedMarker(context: Context, distro: Distro): File = File(rootfsDir(context, distro), ".pocketshell_installed")
     fun isInstalled(context: Context, distro: Distro): Boolean = installedMarker(context, distro).exists()
+    fun needsRepair(context: Context, distro: Distro): Boolean =
+        isInstalled(context, distro) && !installedMarker(context, distro).readText().contains("schema=$SETUP_SCHEMA")
 
     /** Whichever distro is currently installed, if any (only one at a time). */
     fun installedDistro(context: Context): Distro? = Distro.ALL.firstOrNull { isInstalled(context, it) }
@@ -111,7 +116,7 @@ object Userland {
     private fun baseArgs(context: Context, distro: Distro): Array<String> {
         val root = rootfsDir(context, distro).absolutePath
         val proot = prootBin(context).absolutePath
-        return arrayOf(
+        val args = mutableListOf(
             proot,
             "--link2symlink",   // emulate hardlinks apk/dpkg rely on
             "--kill-on-exit",
@@ -122,17 +127,29 @@ object Userland {
             "-b", "/proc",
             "-b", "/sys",
             "-b", "/dev/urandom:/dev/random",
+        )
+        StorageAccess.sharedRoot(context)?.let { shared ->
+            args += listOf("-b", "${shared.absolutePath}:/sdcard")
+        }
+        args += listOf(
             "/usr/bin/env", "-i",
             "HOME=/root",
+            "USER=root",
             "TERM=xterm-256color",
+            "COLORTERM=truecolor",
             "LANG=C.UTF-8",
+            "TMPDIR=/tmp",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         )
+        return args.toTypedArray()
     }
 
     /** argv that boots an interactive login shell inside [distro]'s rootfs. */
     fun prootArgs(context: Context, distro: Distro): Array<String> =
-        baseArgs(context, distro) + arrayOf("/bin/sh", "-l")
+        baseArgs(context, distro) + arrayOf(
+            if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh",
+            "-l",
+        )
 
     /** argv that runs [command] non-interactively inside [distro]'s rootfs (no PTY; used for provisioning). */
     fun prootExecArgs(context: Context, distro: Distro, command: String): Array<String> =

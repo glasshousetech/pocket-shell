@@ -15,6 +15,7 @@ import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -45,10 +46,24 @@ import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val serviceState = mutableStateOf<TermService?>(null)
+    private val sshKeyImportMessage = mutableStateOf<String?>(null)
+    private val sshKeyPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            sshKeyImportMessage.value = SshKeyStore.import(this, uri).fold(
+                onSuccess = { it }, onFailure = { "Key import failed: ${it.message}" },
+            )
+        }
+    }
+
+    fun pickSshPrivateKey() {
+        sshKeyImportMessage.value = null
+        sshKeyPicker.launch(arrayOf("application/octet-stream", "text/plain", "*/*"))
+    }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -82,7 +97,7 @@ class MainActivity : ComponentActivity() {
             PocketShellTheme {
                 Surface(color = Color.Transparent) {
                     val service = serviceState.value
-                    if (service == null) Splash() else PocketShellApp(service)
+                    if (service == null) Splash() else PocketShellApp(service, sshKeyImportMessage.value, ::pickSshPrivateKey)
                 }
             }
         }
@@ -108,7 +123,7 @@ private fun Splash() {
 }
 
 @Composable
-private fun PocketShellApp(service: TermService) {
+private fun PocketShellApp(service: TermService, keyImportMessage: String?, onImportKey: () -> Unit) {
     val configuration = LocalConfiguration.current // recomposes on config change
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
@@ -125,7 +140,9 @@ private fun PocketShellApp(service: TermService) {
     // Sessions live in the foreground service (survive backgrounding).
     val sessions = service.sessions
     var activeIndex by remember { mutableIntStateOf(0) }
-    var extraKeysOpen by remember { mutableStateOf(false) }
+    // Phone terminals need ESC/TAB/CTRL/navigation constantly. Keep the row
+    // visible by default; the handle still collapses it when screen space wins.
+    var extraKeysOpen by remember { mutableStateOf(true) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
 
@@ -137,6 +154,7 @@ private fun PocketShellApp(service: TermService) {
     var distroPickerOpen by remember { mutableStateOf(false) }
     var linuxManageOpen by remember { mutableStateOf(false) }
     var themeOpen by remember { mutableStateOf(false) }
+    var connectionsOpen by remember { mutableStateOf(false) }
 
     // AI copilot state
     var copilotOpen by remember { mutableStateOf(false) }
@@ -150,6 +168,12 @@ private fun PocketShellApp(service: TermService) {
     // Repaint the visible terminal when its session's screen changes.
     LaunchedEffect(Unit) {
         service.onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } }
+    }
+    LaunchedEffect(distroPickerOpen, connectionsOpen, settingsOpen, themeOpen, linuxManageOpen) {
+        if (distroPickerOpen || connectionsOpen || settingsOpen || themeOpen || linuxManageOpen) {
+            delay(100)
+            viewClient.hideKeyboard()
+        }
     }
 
     fun addSession(mode: SessionMode) {
@@ -220,7 +244,24 @@ private fun PocketShellApp(service: TermService) {
         themeOpen = false
     }
 
-    LaunchedEffect(Unit) { if (sessions.isEmpty()) addSession(defaultMode()) }
+    LaunchedEffect(Unit) {
+        if (sessions.isEmpty()) {
+            addSession(defaultMode())
+            // First launch should lead directly into installing a real Linux
+            // environment instead of stranding the user in Android toybox.
+            if (Userland.installedDistro(ctx) == null) distroPickerOpen = true
+        }
+        // v0.2 and earlier could mark setup complete after silently failing to
+        // install ssh. Repair those installs in place, preserving ~/.ssh.
+        Userland.installedDistro(ctx)?.takeIf { Userland.needsRepair(ctx, it) }?.let { distro ->
+            setupStatus = "Checking existing Linux setup…"
+            val repaired = Bootstrap.repair(ctx, distro) { msg ->
+                scope.launch(Dispatchers.Main) { setupStatus = msg }
+            }
+            setupStatus = null
+            repaired.onFailure { setupError = "Linux repair failed: ${it.message}" }
+        }
+    }
     if (sessions.isEmpty()) return
 
     val active = sessions[activeIndex.coerceIn(0, sessions.size - 1)]
@@ -261,13 +302,32 @@ private fun PocketShellApp(service: TermService) {
         termViewRef.value?.let { it.requestFocus(); viewClient.showKeyboard() }
     }
 
+    fun connect(profile: SshProfile) {
+        connectionsOpen = false
+        if (Userland.installedDistro(ctx) == null) {
+            setupError = "Install Ubuntu first so Pocket Shell has a verified SSH client."
+            distroPickerOpen = true
+            return
+        }
+        val holder = service.newSession(SessionMode.LINUX)
+        activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
+        scope.launch {
+            delay(450)
+            holder.session.write(profile.command() + "\n")
+            termViewRef.value?.let { view ->
+                view.attachSession(holder.session); view.onScreenUpdated(); view.requestFocus(); viewClient.showKeyboard()
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         TabRail(
             sessions = sessions.map { it.label.value to it.alive.value },
             activeIndex = activeIndex,
             onSelect = { activeIndex = it },
             onClose = { closeSession(it) },
-            onAdd = { addSession(SessionMode.SYSTEM) },
+            onAdd = { addSession(defaultMode()) },
+            onConnect = { viewClient.hideKeyboard(); connectionsOpen = true },
             onAddLinux = { addLinux() },
             onLinuxManage = { linuxManageOpen = true },
             onTheme = { themeOpen = true },
@@ -368,6 +428,15 @@ private fun PocketShellApp(service: TermService) {
         )
     }
 
+    if (connectionsOpen) {
+        ConnectionsDialog(
+            keyImportMessage = keyImportMessage,
+            onImportKey = onImportKey,
+            onConnect = { connect(it) },
+            onDismiss = { connectionsOpen = false },
+        )
+    }
+
     if (distroPickerOpen) {
         DistroPickerDialog(
             onPick = { installDistro(it) },
@@ -400,120 +469,99 @@ private fun TabRail(
     onSelect: (Int) -> Unit,
     onClose: (Int) -> Unit,
     onAdd: () -> Unit,
+    onConnect: () -> Unit,
     onAddLinux: () -> Unit,
     onLinuxManage: () -> Unit,
     onTheme: () -> Unit,
     onCopilot: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(RailSurfaceAlt)
-            .horizontalScroll(rememberScrollState())
-            .padding(6.dp, 6.dp, 6.dp, 0.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        sessions.forEachIndexed { i, (label, alive) ->
-            val active = i == activeIndex
-            Column(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                    .background(if (active) RailBg else RailSurface)
-                    .clickable { onSelect(i) },
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                ) {
-                    Text(
-                        "●",
-                        color = if (alive) RailAccent else RailDimText,
-                        fontSize = 10.sp,
-                        modifier = Modifier.padding(end = 5.dp),
-                    )
-                    Text(
-                        label,
-                        color = if (active) RailPromptText else RailAccentDim,
-                        fontFamily = RailMono,
-                        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                        fontSize = 12.sp,
-                    )
-                    if (active) {
-                        Text(
-                            "✕",
-                            color = RailDimText,
-                            fontSize = 12.sp,
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable { onClose(i) }
-                                .padding(horizontal = 3.dp),
-                        )
-                    }
-                }
-                Box(
+    Column(modifier = Modifier.fillMaxWidth().background(RailSurfaceAlt)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(6.dp, 6.dp, 6.dp, 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            sessions.forEachIndexed { i, (label, alive) ->
+                val active = i == activeIndex
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .background(if (active) RailAccent else Color.Transparent),
-                )
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (active) RailBg else RailSurface)
+                        .clickable { onSelect(i) },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text("●", color = if (alive) RailAccent else RailDimText, fontSize = 9.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            label,
+                            color = if (active) RailPromptText else RailAccentDim,
+                            fontFamily = RailMono,
+                            fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                        )
+                        if (active) {
+                            Text(
+                                "×",
+                                color = RailDimText,
+                                fontSize = 15.sp,
+                                modifier = Modifier
+                                    .padding(start = 10.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable { onClose(i) }
+                                    .padding(horizontal = 3.dp),
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier.fillMaxWidth().height(2.dp)
+                            .background(if (active) RailAccent else Color.Transparent),
+                    )
+                }
             }
         }
-        Text(
-            "+",
-            color = RailAccentDim,
-            fontFamily = RailMono,
-            fontWeight = FontWeight.Medium,
-            fontSize = 14.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                .background(RailSurface)
-                .clickable { onAdd() }
-                .padding(horizontal = 16.dp, vertical = 9.dp),
-        )
-        // New Linux session — opens the distro picker on first use, then just
-        // opens a session. Long-press to manage/uninstall the installed distro.
-        Text(
-            "🐧",
-            fontSize = 13.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                .background(RailSurface)
-                .combinedClickable(onClick = { onAddLinux() }, onLongClick = { onLinuxManage() })
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        )
-        // Terminal color theme picker.
-        Text(
-            "🎨",
-            fontSize = 13.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                .background(RailSurface)
-                .clickable { onTheme() }
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        )
-        // AI copilot toggle.
-        Text(
-            "✨",
-            fontSize = 13.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                .background(RailSurface)
-                .clickable { onCopilot() }
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        )
-        // Settings.
-        Text(
-            "⚙",
-            color = RailAccentDim,
-            fontSize = 15.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                .background(RailSurface)
-                .clickable { onSettings() }
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        )
+
+        // Session tabs may scroll; primary actions never do. This keeps every
+        // control reachable on a 390px phone instead of hiding Settings beyond
+        // the end of the tab strip.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            RailAction("Connect", onConnect, Modifier.weight(1.3f))
+            RailAction("＋", onAdd, Modifier.weight(.7f))
+            RailAction("Linux", onAddLinux, Modifier.weight(1f), onLongClick = onLinuxManage)
+            RailAction("AI", onCopilot, Modifier.weight(.75f))
+            RailAction("Theme", onTheme, Modifier.weight(1f))
+            RailAction("⚙", onSettings, Modifier.width(44.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RailAction(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Box(
+        modifier = modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(RailSurface)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = RailAccentDim, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 10.sp, maxLines = 1)
     }
 }
 
