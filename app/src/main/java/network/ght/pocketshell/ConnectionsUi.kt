@@ -39,7 +39,9 @@ data class SshProfile(
         val safePort = port.takeIf { it in 1..65535 }
             ?: throw IllegalArgumentException("Port must be between 1 and 65535.")
         val destination = if (safeUser.isEmpty()) safeHost else "$safeUser@$safeHost"
-        val base = "ssh -t -p $safePort $destination"
+        val base = "ssh -t -p $safePort -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes " +
+            "-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 " +
+            "-o ServerAliveCountMax=3 -o ConnectTimeout=15 $destination"
         val session = tmuxSession.trim()
         return if (session.isEmpty()) base else {
             require(session.matches(Regex("[A-Za-z0-9._-]+"))) { "tmux session contains unsupported characters." }
@@ -84,7 +86,9 @@ object SshProfiles {
 @Composable
 fun ConnectionsDialog(
     keyImportMessage: String?,
+    publicKey: String?,
     onImportKey: () -> Unit,
+    onCopyPublicKey: () -> Unit,
     onConnect: (SshProfile) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -96,6 +100,7 @@ fun ConnectionsDialog(
     var port by remember { mutableStateOf(saved.port.toString()) }
     var tmux by remember { mutableStateOf(saved.tmuxSession) }
     var error by remember { mutableStateOf<String?>(null) }
+    var keyCopied by remember { mutableStateOf(false) }
     val maxHeight = with(LocalConfiguration.current) { (screenHeightDp * .88f).dp }
 
     fun connect(profile: SshProfile) {
@@ -135,6 +140,27 @@ fun ConnectionsDialog(
                 "Keys stay private inside Pocket Shell's Linux environment and are never copied to shared phone storage.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
             )
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(if (publicKey != null) RailAccent.copy(alpha = .18f) else RailKeyChip)
+                    .clickable(enabled = publicKey != null) {
+                        onCopyPublicKey()
+                        keyCopied = true
+                    }.padding(11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (publicKey != null) "Copy public key for server access" else "Preparing SSH identity…",
+                    color = if (publicKey != null) RailPromptText else RailDimText,
+                    fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 11.sp,
+                )
+            }
+            if (keyCopied) {
+                Text(
+                    "Public key copied. Add it to the server account, then tap Agent droplet.",
+                    color = RailAccent, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
+                )
+            }
             Box(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(RailKeyChip)
                     .clickable(onClick = onImportKey).padding(11.dp),

@@ -58,12 +58,15 @@ object Bootstrap {
                 // SSH is the product's primary workflow, not an optional extra.
                 // Do not mark a rootfs ready unless the core shell and ssh
                 // client were installed and actually execute successfully.
-                onStatus("Installing secure shell…")
+                onStatus("Installing shell and SSH…")
                 provisionCore(context, distro)
                 onStatus("Installing developer toolkit…")
-                runCatching { provisionToolkit(context, distro) }
+                provisionToolkit(context, distro)
 
-                onStatus("Verifying terminal and SSH…")
+                onStatus("Creating SSH identity…")
+                ensureIdentitySync(context, distro)
+
+                onStatus("Verifying complete toolchain…")
                 verifyCore(context, distro)
 
                 val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
@@ -84,13 +87,32 @@ object Bootstrap {
                 configure(Userland.rootfsDir(context, distro), distro)
                 provisionCore(context, distro)
                 onStatus("Refreshing developer toolkit…")
-                runCatching { provisionToolkit(context, distro) }
+                provisionToolkit(context, distro)
+                onStatus("Checking SSH identity…")
+                ensureIdentitySync(context, distro)
                 onStatus("Running health check…")
                 verifyCore(context, distro)
                 val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
                 Userland.installedMarker(context, distro).writeText("${distro.id} $version schema=${Userland.SETUP_SCHEMA}\n")
             }
         }
+
+    /** Ensures a self-contained keypair exists and returns its public key. */
+    suspend fun ensureIdentity(context: Context): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val distro = Userland.installedDistro(context) ?: error("Linux is not installed.")
+            ensureIdentitySync(context, distro)
+            SshKeyStore.publicKey(context).getOrThrow()
+        }
+    }
+
+    /** Executes the same gate used at install time without modifying the rootfs. */
+    suspend fun healthCheck(context: Context): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val distro = Userland.installedDistro(context) ?: error("Linux is not installed.")
+            verifyCore(context, distro)
+        }
+    }
 
     private fun rootfsDirExists(context: Context, distro: Distro): Boolean =
         File(Userland.rootfsDir(context, distro), "bin/sh").exists()
@@ -180,14 +202,39 @@ object Bootstrap {
 
     private fun provisionToolkit(context: Context, distro: Distro) {
         val command = when (distro) {
-            Distro.Alpine -> "apk add --no-cache python3 py3-pip git github-cli wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less nodejs npm build-base || true"
-            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive && apt-get install -y --no-install-recommends python3 python3-pip git wget vim nano jq rsync zip unzip less nodejs npm build-essential || true; rm -rf /var/lib/apt/lists/*"
+            Distro.Alpine -> "apk add --no-cache python3 py3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less nodejs npm build-base procps"
+            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive && apt-get install -y --no-install-recommends " +
+                "python3 python3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less " +
+                "nodejs npm build-essential procps && rm -rf /var/lib/apt/lists/*"
         }
-        runGuest(context, distro, command, 300)
+        runGuest(context, distro, command, 420)
     }
 
-    private fun verifyCore(context: Context, distro: Distro) {
-        runGuest(context, distro, "bash --version >/dev/null && ssh -V && tmux -V", 30)
+    private fun ensureIdentitySync(context: Context, distro: Distro) {
+        runGuest(
+            context,
+            distro,
+            "set -eu; mkdir -p /root/.ssh; chmod 700 /root/.ssh; " +
+                "if [ ! -s /root/.ssh/id_ed25519 ]; then " +
+                "ssh-keygen -q -t ed25519 -N '' -C 'pocket-shell' -f /root/.ssh/id_ed25519; " +
+                "elif [ ! -s /root/.ssh/id_ed25519.pub ]; then " +
+                "ssh-keygen -y -f /root/.ssh/id_ed25519 > /root/.ssh/id_ed25519.pub; fi; " +
+                "chmod 600 /root/.ssh/id_ed25519; chmod 644 /root/.ssh/id_ed25519.pub",
+            45,
+        )
+    }
+
+    private fun verifyCore(context: Context, distro: Distro): String {
+        return runGuest(
+            context,
+            distro,
+            "set -eu; " +
+                "for c in bash ssh ssh-keygen tmux git python3 node npm vim nano curl wget jq rsync tar gzip ps; do " +
+                "command -v \"\$c\" >/dev/null || { echo \"missing:\$c\"; exit 12; }; done; " +
+                "test -s /root/.ssh/id_ed25519; test -s /root/.ssh/id_ed25519.pub; " +
+                "printf 'READY '; bash --version | head -1; ssh -V; tmux -V; git --version; python3 --version; node --version; npm --version",
+            45,
+        )
     }
 
     /** Runs a bounded guest command and drains output without defeating the timeout. */
@@ -226,11 +273,15 @@ object Bootstrap {
         File(root, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost\n")
         File(root, "etc/profile.d").mkdirs()
         File(root, "root/.ssh").apply { mkdirs(); Os.chmod(absolutePath, 448) }
-        File(root, "root/.ssh/config").writeText(
-            "Host *\n  ServerAliveInterval 30\n  ServerAliveCountMax 3\n" +
-                "  TCPKeepAlive yes\n  AddKeysToAgent yes\n  IdentitiesOnly no\n"
-        )
-        Os.chmod(File(root, "root/.ssh/config").absolutePath, 384)
+        File(root, "tmp").apply { mkdirs(); Os.chmod(absolutePath, 1023) } // 01777
+        val sshConfig = File(root, "root/.ssh/config")
+        if (!sshConfig.exists()) {
+            sshConfig.writeText(
+                "Host *\n  ServerAliveInterval 30\n  ServerAliveCountMax 3\n" +
+                    "  TCPKeepAlive yes\n  IdentitiesOnly yes\n  IdentityFile ~/.ssh/id_ed25519\n"
+            )
+        }
+        Os.chmod(sshConfig.absolutePath, 384)
 
         when (distro) {
             Distro.Alpine -> {

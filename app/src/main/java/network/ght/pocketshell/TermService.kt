@@ -132,8 +132,18 @@ class TermService : Service() {
 
         var restoredAny = false
         saved.forEach { entry ->
-            if (entry.mode == SessionMode.LINUX && Userland.installedDistro(this) == null) return@forEach
-            runCatching { restoreSession(entry) }
+            val installed = Userland.installedDistro(this)
+            // SYSTEM was an Android toybox escape hatch, not a usable Pocket
+            // Shell environment. Migrate old saved sh tabs to Linux when
+            // possible and discard them before setup otherwise.
+            val effective = when {
+                entry.mode == SessionMode.SYSTEM && installed != null ->
+                    entry.copy(mode = SessionMode.LINUX, title = "linux")
+                entry.mode == SessionMode.SYSTEM -> return@forEach
+                installed == null -> return@forEach
+                else -> entry
+            }
+            runCatching { restoreSession(effective) }
                 .onSuccess { restoredAny = true }
         }
         // Consume the snapshot only once something actually came back from it,

@@ -36,6 +36,7 @@ object SshKeyStore {
         val sshDir = File(Userland.rootfsDir(context, distro), "root/.ssh").apply { mkdirs() }
         Os.chmod(sshDir.absolutePath, 448) // 0700
         val target = File(sshDir, "id_ed25519")
+        val publicTarget = File(sshDir, "id_ed25519.pub")
         val temp = File(sshDir, ".id_ed25519.import")
         temp.writeBytes(bytes)
         Os.chmod(temp.absolutePath, 384) // 0600
@@ -44,6 +45,21 @@ object SshKeyStore {
             Os.chmod(target.absolutePath, 384)
             temp.delete()
         }
+        // Never leave the public half from a previously generated/imported
+        // identity beside a newly imported private key. Bootstrap derives the
+        // matching public key with ssh-keygen before Connect becomes available.
+        publicTarget.delete()
         "Key imported securely to ~/.ssh/id_ed25519"
+    }
+
+    fun publicKey(context: Context): Result<String> = runCatching {
+        val distro = Userland.installedDistro(context) ?: error("Linux is not installed.")
+        val key = File(Userland.rootfsDir(context, distro), "root/.ssh/id_ed25519.pub")
+            .takeIf { it.isFile }?.readText()?.trim()
+            ?: error("No public key is available yet.")
+        require(key.startsWith("ssh-ed25519 ") || key.startsWith("ssh-rsa ") || key.startsWith("ecdsa-")) {
+            "The generated public key is invalid."
+        }
+        key
     }
 }
