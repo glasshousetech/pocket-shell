@@ -20,8 +20,8 @@ android {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.3.0"
+        versionCode = 7
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -90,6 +90,8 @@ dependencies {
     // Prebuilt .so for all ABIs ships in the AAR — no NDK needed. GPLv3.
     // terminal-emulator is pulled in transitively.
     implementation("com.termux.termux-app:terminal-view:0.118.0")
+
+    testImplementation("junit:junit:4.13.2")
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

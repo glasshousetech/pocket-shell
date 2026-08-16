@@ -32,7 +32,9 @@ object Userland {
 
     const val ALPINE_VERSION = "3.20.10"
     const val UBUNTU_VERSION = "24.04.4"
-    const val SETUP_SCHEMA = 2
+    // v3 removes Android toybox from the user workflow and verifies the full
+    // daily-driver toolchain plus a usable SSH identity.
+    const val SETUP_SCHEMA = 3
 
     data class Rootfs(val url: String, val sha256: String)
 

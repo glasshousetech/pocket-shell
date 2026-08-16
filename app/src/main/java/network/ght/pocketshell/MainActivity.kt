@@ -135,7 +135,9 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     // Load the persisted terminal color theme before any session/emulator is
     // created, so the very first session already renders with it.
     var currentThemeId by remember { mutableStateOf(TermThemes.saved(ctx).id) }
-    remember { TerminalColors.COLOR_SCHEME.updateWith(TermThemes.byId(currentThemeId).toProperties()) }
+    SideEffect {
+        TerminalColors.COLOR_SCHEME.updateWith(TermThemes.byId(currentThemeId).toProperties())
+    }
 
     // Sessions live in the foreground service (survive backgrounding).
     val sessions = service.sessions
@@ -153,8 +155,11 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     var setupError by remember { mutableStateOf<String?>(null) }
     var distroPickerOpen by remember { mutableStateOf(false) }
     var linuxManageOpen by remember { mutableStateOf(false) }
+    var linuxHealthMessage by remember { mutableStateOf<String?>(null) }
+    var linuxHealthBusy by remember { mutableStateOf(false) }
     var themeOpen by remember { mutableStateOf(false) }
     var connectionsOpen by remember { mutableStateOf(false) }
+    var publicKey by remember { mutableStateOf(SshKeyStore.publicKey(ctx).getOrNull()) }
 
     // AI copilot state
     var copilotOpen by remember { mutableStateOf(false) }
@@ -177,6 +182,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     fun addSession(mode: SessionMode) {
+        if (mode != SessionMode.LINUX || Userland.installedDistro(ctx) == null) {
+            distroPickerOpen = true
+            return
+        }
         val holder = service.newSession(mode)
         activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
         termViewRef.value?.let {
@@ -186,18 +195,14 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         }
     }
 
-    // Prefer the installed Linux distro over the bare Android shell whenever we
-    // have to conjure a session with no other signal to go on (cold start, or
-    // "always keep one tab open" after closing the last one) — SYSTEM's PATH is
-    // just /system/bin, so a user who already installed Alpine/Ubuntu should
-    // land in the real userland, not the crippled toybox shell, by default.
-    fun defaultMode(): SessionMode =
-        if (Userland.installedDistro(ctx) != null) SessionMode.LINUX else SessionMode.SYSTEM
-
     fun closeSession(index: Int) {
         val holder = sessions.getOrNull(index) ?: return
         service.closeSession(holder)
-        if (sessions.isEmpty()) { addSession(defaultMode()); return }
+        if (sessions.isEmpty()) {
+            if (Userland.installedDistro(ctx) != null) addSession(SessionMode.LINUX)
+            else distroPickerOpen = true
+            return
+        }
         activeIndex = activeIndex.coerceIn(0, sessions.size - 1)
         termViewRef.value?.let {
             it.attachSession(sessions[activeIndex].session)
@@ -227,14 +232,22 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                 scope.launch(Dispatchers.Main) { setupStatus = msg }
             }
             setupStatus = null
-            result.onSuccess { addSession(SessionMode.LINUX) }
+            result.onSuccess {
+                service.sessions.toList().forEach(service::closeSession)
+                publicKey = SshKeyStore.publicKey(ctx).getOrNull()
+                addSession(SessionMode.LINUX)
+            }
                 .onFailure { setupError = it.message ?: "Install failed." }
         }
     }
 
     fun uninstallLinux() {
+        service.sessions.toList().forEach(service::closeSession)
         Userland.uninstall(ctx)
+        activeIndex = 0
+        publicKey = null
         linuxManageOpen = false
+        distroPickerOpen = true
     }
 
     fun setTheme(theme: TermTheme) {
@@ -245,24 +258,74 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     LaunchedEffect(Unit) {
-        if (sessions.isEmpty()) {
-            addSession(defaultMode())
-            // First launch should lead directly into installing a real Linux
-            // environment instead of stranding the user in Android toybox.
-            if (Userland.installedDistro(ctx) == null) distroPickerOpen = true
+        val distro = Userland.installedDistro(ctx)
+        if (distro == null) {
+            service.sessions.toList().forEach(service::closeSession)
+            distroPickerOpen = true
+            return@LaunchedEffect
         }
-        // v0.2 and earlier could mark setup complete after silently failing to
-        // install ssh. Repair those installs in place, preserving ~/.ssh.
-        Userland.installedDistro(ctx)?.takeIf { Userland.needsRepair(ctx, it) }?.let { distro ->
-            setupStatus = "Checking existing Linux setup…"
-            val repaired = Bootstrap.repair(ctx, distro) { msg ->
+
+        // A marker is not proof. Block the terminal, test the real commands,
+        // and repair any v0.3/broken rootfs before creating a user-facing tab.
+        service.sessions.toList().forEach(service::closeSession)
+        setupStatus = "Verifying Linux environment…"
+        var ready: Result<Unit> = if (Userland.needsRepair(ctx, distro)) {
+            Result.failure(IllegalStateException("setup upgrade required"))
+        } else {
+            Bootstrap.healthCheck(ctx).map { Unit }
+        }
+        if (ready.isFailure) {
+            ready = Bootstrap.repair(ctx, distro) { msg ->
                 scope.launch(Dispatchers.Main) { setupStatus = msg }
             }
-            setupStatus = null
-            repaired.onFailure { setupError = "Linux repair failed: ${it.message}" }
+        }
+        setupStatus = null
+        ready.onSuccess {
+            publicKey = SshKeyStore.publicKey(ctx).getOrNull()
+            addSession(SessionMode.LINUX)
+        }.onFailure { setupError = "Linux repair failed: ${it.message}" }
+    }
+
+    LaunchedEffect(keyImportMessage) {
+        if (keyImportMessage?.startsWith("Key imported") == true) {
+            Bootstrap.ensureIdentity(ctx)
+                .onSuccess { publicKey = it }
+                .onFailure { setupError = "Couldn't prepare imported key: ${it.message}" }
         }
     }
-    if (sessions.isEmpty()) return
+
+    if (sessions.isEmpty()) {
+        SetupHome(
+            installed = Userland.installedDistro(ctx) != null,
+            onSetup = { distroPickerOpen = true },
+            onRepair = {
+                val distro = Userland.installedDistro(ctx) ?: return@SetupHome
+                setupError = null
+                setupStatus = "Repairing Linux…"
+                scope.launch {
+                    val result = Bootstrap.repair(ctx, distro) { msg ->
+                        scope.launch(Dispatchers.Main) { setupStatus = msg }
+                    }
+                    setupStatus = null
+                    result.onSuccess {
+                        publicKey = SshKeyStore.publicKey(ctx).getOrNull()
+                        addSession(SessionMode.LINUX)
+                    }.onFailure { setupError = it.message ?: "Repair failed." }
+                }
+            },
+        )
+        if (setupStatus != null || setupError != null) {
+            SetupOverlay(status = setupStatus, error = setupError, onDismiss = { setupError = null })
+        }
+        if (distroPickerOpen) {
+            DistroPickerDialog(
+                onPick = { installDistro(it) },
+                onDismiss = {},
+                setupRequired = true,
+            )
+        }
+        return
+    }
 
     val active = sessions[activeIndex.coerceIn(0, sessions.size - 1)]
 
@@ -326,8 +389,17 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             activeIndex = activeIndex,
             onSelect = { activeIndex = it },
             onClose = { closeSession(it) },
-            onAdd = { addSession(defaultMode()) },
-            onConnect = { viewClient.hideKeyboard(); connectionsOpen = true },
+            onAdd = { addLinux() },
+            onConnect = {
+                viewClient.hideKeyboard()
+                setupStatus = "Checking SSH identity…"
+                scope.launch {
+                    Bootstrap.ensureIdentity(ctx)
+                        .onSuccess { publicKey = it; connectionsOpen = true }
+                        .onFailure { setupError = "SSH identity failed: ${it.message}" }
+                    setupStatus = null
+                }
+            },
             onAddLinux = { addLinux() },
             onLinuxManage = { linuxManageOpen = true },
             onTheme = { themeOpen = true },
@@ -431,7 +503,11 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     if (connectionsOpen) {
         ConnectionsDialog(
             keyImportMessage = keyImportMessage,
+            publicKey = publicKey,
             onImportKey = onImportKey,
+            onCopyPublicKey = {
+                publicKey?.let { Clip.copy(it) }
+            },
             onConnect = { connect(it) },
             onDismiss = { connectionsOpen = false },
         )
@@ -441,12 +517,43 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         DistroPickerDialog(
             onPick = { installDistro(it) },
             onDismiss = { distroPickerOpen = false },
+            setupRequired = false,
         )
     }
 
     if (linuxManageOpen) {
         LinuxManageDialog(
             distro = Userland.installedDistro(ctx),
+            healthMessage = linuxHealthMessage,
+            healthBusy = linuxHealthBusy,
+            onCheck = {
+                linuxHealthBusy = true
+                linuxHealthMessage = "Testing the Linux toolchain…"
+                scope.launch {
+                    Bootstrap.healthCheck(ctx)
+                        .onSuccess { linuxHealthMessage = "Ready — ${it.lineSequence().firstOrNull().orEmpty()}" }
+                        .onFailure { linuxHealthMessage = "Self-test failed — ${it.message}" }
+                    linuxHealthBusy = false
+                }
+            },
+            onRepair = {
+                val distro = Userland.installedDistro(ctx)
+                if (distro == null) {
+                    linuxHealthMessage = "Linux is not installed."
+                } else {
+                    linuxHealthBusy = true
+                    linuxHealthMessage = "Repairing Linux…"
+                    scope.launch {
+                        Bootstrap.repair(ctx, distro) { msg ->
+                            scope.launch(Dispatchers.Main) { linuxHealthMessage = msg }
+                        }.onSuccess {
+                            publicKey = SshKeyStore.publicKey(ctx).getOrNull()
+                            linuxHealthMessage = "Ready — complete toolchain and SSH identity verified."
+                        }.onFailure { linuxHealthMessage = "Repair failed — ${it.message}" }
+                        linuxHealthBusy = false
+                    }
+                }
+            },
             onUninstall = { uninstallLinux() },
             onDismiss = { linuxManageOpen = false },
         )
@@ -606,6 +713,42 @@ private fun SetupOverlay(status: String?, error: String?, onDismiss: () -> Unit)
                 color = RailDimText,
                 fontFamily = RailMono,
                 fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupHome(installed: Boolean, onSetup: () -> Unit, onRepair: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(RailBg).padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("PS", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 42.sp)
+        Spacer(Modifier.height(18.dp))
+        Text(
+            if (installed) "Linux needs repair" else "Build your Pocket Shell",
+            color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 20.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            if (installed) {
+                "Pocket Shell will verify and restore the complete Bash, SSH, Git, Python, Node, editor, and tmux toolchain before opening a terminal."
+            } else {
+                "A real Ubuntu environment with Bash, SSH, Git, Python, Node, editors, tmux, phone storage, and an app-managed SSH identity. No Android toybox shell."
+            },
+            color = RailDimText, fontFamily = RailMono, fontSize = 12.sp, lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(22.dp))
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(RailAccent.copy(alpha = .2f))
+                .clickable(onClick = if (installed) onRepair else onSetup).padding(14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (installed) "Repair & verify Linux" else "Set up Ubuntu",
+                color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp,
             )
         }
     }

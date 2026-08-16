@@ -49,12 +49,13 @@ jobs:
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
           files: |
             app/build/outputs/apk/release/app-release.apk
             app/build/outputs/bundle/release/app-release.aab
 
       - name: Publish to Play Store (internal track)
-        if: ${{ env.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        if: ${{ env.PLAY_SERVICE_ACCOUNT_JSON != '' && !contains(github.ref_name, '-rc') }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}

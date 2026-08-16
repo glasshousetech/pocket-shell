@@ -18,8 +18,14 @@ frosted-glass look. The goal is a terminal that feels like a native app, not a
 - **One-tap remote workspaces** — Connect opens `agent.ght.network` or a saved
   SSH host inside a named tmux session, so a mobile-network drop does not kill
   the running agent CLI.
-- **Verified first run** — Ubuntu is recommended and Pocket Shell will not call
-  setup complete until Bash, OpenSSH, and tmux execute inside the userland.
+- **Linux-only first run** — Ubuntu is recommended and Pocket Shell never drops
+  the user into Android's limited toybox shell. Setup must verify the complete
+  developer toolchain and an SSH identity before a terminal can open.
+- **Guided SSH enrollment** — Pocket Shell generates its own private identity,
+  keeps it inside app-private Linux storage, and exposes only a one-tap **Copy
+  public key** action for server authorization.
+- **Self-healing environment** — long-press the Linux tab to run the same
+  toolchain health gate used at startup or repair an incomplete installation.
 
 ## Architecture
 
@@ -70,8 +76,9 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
       `ThemeUi.kt`.
 - [x] Session persistence across process death (best-effort scrollback replay; see `SessionStore.kt`)
 - [x] SSH connection workspace with saved custom host and tmux reconnect
-- [x] Bounded, recoverable provisioning with mandatory SSH health verification
-- [x] Secure SSH private-key import through Android's document picker
+- [x] Bounded, recoverable provisioning with mandatory full-toolchain verification
+- [x] App-managed Ed25519 identity, public-key copy workflow, and secure private-key import
+- [x] Linux self-test/repair UI and automatic migration away from legacy Android `sh` tabs
 - [ ] Configurable extra-keys layouts
 
 ## License

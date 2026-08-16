@@ -22,6 +22,7 @@ import network.ght.pocketshell.ui.*
 fun DistroPickerDialog(
     onPick: (Distro) -> Unit,
     onDismiss: () -> Unit,
+    setupRequired: Boolean = false,
 ) {
     val ctx = LocalContext.current
     Dialog(onDismissRequest = onDismiss) {
@@ -41,8 +42,10 @@ fun DistroPickerDialog(
                 val available = Userland.isAvailable(ctx, distro)
                 DistroRow(distro, available, recommended = distro == Distro.Ubuntu, onClick = { if (available) onPick(distro) })
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
-                TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
+            if (!setupRequired) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
+                    TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
+                }
             }
         }
     }
@@ -84,6 +87,10 @@ private fun DistroRow(distro: Distro, available: Boolean, recommended: Boolean, 
 @Composable
 fun LinuxManageDialog(
     distro: Distro?,
+    healthMessage: String?,
+    healthBusy: Boolean,
+    onCheck: () -> Unit,
+    onRepair: () -> Unit,
     onUninstall: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -98,9 +105,22 @@ fun LinuxManageDialog(
             Text("Linux", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             if (distro != null) {
                 Text(
-                    "${distro.label} is installed.",
+                    "${distro.label} is installed. Pocket Shell uses only this Linux environment for terminal tabs.",
                     color = RailOutText, fontFamily = RailMono, fontSize = 12.sp,
                 )
+                Text(
+                    healthMessage ?: "Run a self-test to verify Bash, SSH, Git, Python, Node, editors, tmux, and the SSH identity.",
+                    color = if (healthMessage?.startsWith("Ready") == true) RailAccent else RailDimText,
+                    fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(enabled = !healthBusy, onClick = onCheck, modifier = Modifier.weight(1f)) {
+                        Text(if (healthBusy) "Working…" else "Self-test", color = RailAccent, fontFamily = RailMono)
+                    }
+                    TextButton(enabled = !healthBusy, onClick = onRepair, modifier = Modifier.weight(1f)) {
+                        Text("Repair", color = RailAccent, fontFamily = RailMono)
+                    }
+                }
                 Text(
                     "Uninstalling removes the rootfs entirely and closes any open Linux tabs' data on next launch. You'll be able to pick a distro again from scratch.",
                     color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
