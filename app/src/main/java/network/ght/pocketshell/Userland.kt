@@ -75,6 +75,26 @@ object Userland {
         Distro.Ubuntu -> UBUNTU_ROOTFS
     }
 
+    /**
+     * Ubuntu Base is intentionally a minimal root filesystem and does not ship
+     * an APT sources file. Keep Pocket Shell's repositories app-owned and pick
+     * the official Ubuntu mirror for the guest architecture.
+     */
+    fun ubuntuAptSources(abi: String): String {
+        val mirror = when (abi) {
+            "x86_64", "x86" -> "http://archive.ubuntu.com/ubuntu"
+            "arm64-v8a", "armeabi-v7a" -> "http://ports.ubuntu.com/ubuntu-ports"
+            else -> error("No Ubuntu APT mirror is configured for Android ABI $abi.")
+        }
+        return """
+            Types: deb
+            URIs: $mirror
+            Suites: noble noble-updates noble-security
+            Components: main restricted universe multiverse
+            Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+        """.trimIndent() + "\n"
+    }
+
     /** First device ABI we have both a proot binary and a rootfs for, for this distro. */
     fun supportedAbi(distro: Distro): String? = Build.SUPPORTED_ABIS.firstOrNull { rootfsMap(distro).containsKey(it) }
     fun rootfsFor(distro: Distro, abi: String): Rootfs? = rootfsMap(distro)[abi]

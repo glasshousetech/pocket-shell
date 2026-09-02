@@ -35,6 +35,12 @@ on an ARM64 Android phone. A successful Gradle build is not acceptance.
 - v0.3 private-key import could retain the prior identity's `.pub` file. The
   copied public key could therefore differ from the private key selected by SSH,
   producing `Permission denied (publickey)` even after server enrollment.
+- v0.4 initially assumed Canonical's Ubuntu Base archive contained an APT
+  sources file. It does not: it is a deliberately bare root filesystem. Repair
+  therefore ran `apt-get update` with no repositories and could not restore the
+  toolchain. Pocket Shell now writes a signed, app-owned `pocketshell.sources`
+  file using `archive.ubuntu.com` for x86 and `ports.ubuntu.com` for ARM, then
+  makes provisioning use that file exclusively.
 - `PROOT_NO_SECCOMP=1` must not be set. It made the x86_64 emulator's legacy
   `poll`/`fork` path fail with `Function not implemented`.
 - Android x86_64 emulator processes run under a zygote seccomp filter that can
