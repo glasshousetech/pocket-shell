@@ -147,6 +147,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     var extraKeysOpen by remember { mutableStateOf(true) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
+    // Persisted extra-keys layout (preset or customized); default is the
+    // original hardcoded row, so nothing changes until the user picks one.
+    var extraKeys by remember { mutableStateOf(ExtraKeysLayouts.saved(ctx)) }
+    var keysDialogOpen by remember { mutableStateOf(false) }
 
     val termViewRef = remember { mutableStateOf<TerminalView?>(null) }
     val viewClient = remember { RailViewClient(ctx, fontPx) }
@@ -174,8 +178,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     LaunchedEffect(Unit) {
         service.onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } }
     }
-    LaunchedEffect(distroPickerOpen, connectionsOpen, settingsOpen, themeOpen, linuxManageOpen) {
-        if (distroPickerOpen || connectionsOpen || settingsOpen || themeOpen || linuxManageOpen) {
+    LaunchedEffect(distroPickerOpen, connectionsOpen, settingsOpen, themeOpen, linuxManageOpen, keysDialogOpen) {
+        if (distroPickerOpen || connectionsOpen || settingsOpen || themeOpen || linuxManageOpen || keysDialogOpen) {
             delay(100)
             viewClient.hideKeyboard()
         }
@@ -460,6 +464,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     ctrlMenuOpen -> CtrlMenu(onKey = { cp -> sendCtrl(cp) }, onBack = { ctrlMenuOpen = false })
                     altMenuOpen -> AltMenu(onKey = { cp -> sendAlt(cp) }, onBack = { altMenuOpen = false })
                     else -> ExtraKeysRow(
+                        keys = extraKeys,
                         onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
                         onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
                         onCtrl = { ctrlMenuOpen = true },
@@ -480,6 +485,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             ExtraKeysHandle(
                 open = extraKeysOpen,
                 onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false; altMenuOpen = false },
+                onLongClick = { keysDialogOpen = true },
             )
         }
     }
@@ -564,6 +570,23 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             currentId = currentThemeId,
             onPick = { setTheme(it) },
             onDismiss = { themeOpen = false },
+        )
+    }
+
+    if (keysDialogOpen) {
+        ExtraKeysDialog(
+            current = extraKeys,
+            onPickPreset = { preset ->
+                ExtraKeysLayouts.savePreset(ctx, preset)
+                extraKeys = preset.keys
+            },
+            onChange = { keys ->
+                if (keys.isNotEmpty()) {
+                    ExtraKeysLayouts.saveCustom(ctx, keys)
+                    extraKeys = keys
+                }
+            },
+            onDismiss = { keysDialogOpen = false },
         )
     }
 }
@@ -760,8 +783,11 @@ private fun SetupHome(installed: Boolean, onSetup: () -> Unit, onRepair: () -> U
 // combos double as line-editing shortcuts; ALT combos are readline word-jump),
 // and the punctuation shell commands and ssh flags/paths lean on most
 // (path/pipe separators, flag dash, negation, home-dir tilde, port colon).
+// Which keys appear, and in what order, comes from [keys] — see
+// ExtraKeysLayouts for the presets and persistence.
 @Composable
 private fun ExtraKeysRow(
+    keys: List<ExtraKey>,
     onEsc: () -> Unit,
     onTab: () -> Unit,
     onCtrl: () -> Unit,
@@ -785,31 +811,28 @@ private fun ExtraKeysRow(
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        KeyChip("ESC", onClick = onEsc)
-        KeyChip("TAB", onClick = onTab)
-        KeyChip("CTRL", onClick = onCtrl)
-        KeyChip("ALT", onClick = onAlt)
-        KeyChip("←", onClick = onLeft)
-        KeyChip("↓", onClick = onDown)
-        KeyChip("↑", onClick = onUp)
-        KeyChip("→", onClick = onRight)
-        KeyChip("HOME", onClick = onHome)
-        KeyChip("END", onClick = onEnd)
-        KeyChip("PGUP", onClick = onPgUp)
-        KeyChip("PGDN", onClick = onPgDown)
-        KeyChip("DEL", onClick = onDel)
-        KeyChip("-") { onLiteral('-') }
-        KeyChip("_") { onLiteral('_') }
-        KeyChip("~") { onLiteral('~') }
-        KeyChip("/") { onLiteral('/') }
-        KeyChip("|") { onLiteral('|') }
-        KeyChip(":") { onLiteral(':') }
-        KeyChip(".") { onLiteral('.') }
-        KeyChip("*") { onLiteral('*') }
-        KeyChip("=") { onLiteral('=') }
-        KeyChip("\"") { onLiteral('"') }
-        KeyChip("'") { onLiteral('\'') }
-        KeyChip("$") { onLiteral('$') }
+        keys.forEach { key ->
+            val literal = key.literal
+            if (literal != null) {
+                KeyChip(key.label) { onLiteral(literal) }
+            } else {
+                when (key) {
+                    ExtraKeysLayouts.ESC -> KeyChip(key.label, onClick = onEsc)
+                    ExtraKeysLayouts.TAB -> KeyChip(key.label, onClick = onTab)
+                    ExtraKeysLayouts.CTRL -> KeyChip(key.label, onClick = onCtrl)
+                    ExtraKeysLayouts.ALT -> KeyChip(key.label, onClick = onAlt)
+                    ExtraKeysLayouts.LEFT -> KeyChip(key.label, onClick = onLeft)
+                    ExtraKeysLayouts.DOWN -> KeyChip(key.label, onClick = onDown)
+                    ExtraKeysLayouts.UP -> KeyChip(key.label, onClick = onUp)
+                    ExtraKeysLayouts.RIGHT -> KeyChip(key.label, onClick = onRight)
+                    ExtraKeysLayouts.HOME -> KeyChip(key.label, onClick = onHome)
+                    ExtraKeysLayouts.END -> KeyChip(key.label, onClick = onEnd)
+                    ExtraKeysLayouts.PGUP -> KeyChip(key.label, onClick = onPgUp)
+                    ExtraKeysLayouts.PGDN -> KeyChip(key.label, onClick = onPgDown)
+                    ExtraKeysLayouts.DEL -> KeyChip(key.label, onClick = onDel)
+                }
+            }
+        }
     }
 }
 
@@ -866,13 +889,14 @@ private fun KeyChip(label: String, modifier: Modifier = Modifier, onClick: () ->
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ExtraKeysHandle(open: Boolean, onToggle: () -> Unit) {
+private fun ExtraKeysHandle(open: Boolean, onToggle: () -> Unit, onLongClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(RailSurfaceAlt)
-            .clickable(onClick = onToggle)
+            .combinedClickable(onClick = onToggle, onLongClick = onLongClick)
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
