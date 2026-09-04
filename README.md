@@ -79,7 +79,10 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
 - [x] Bounded, recoverable provisioning with mandatory full-toolchain verification
 - [x] App-managed Ed25519 identity, public-key copy workflow, and secure private-key import
 - [x] Linux self-test/repair UI and automatic migration away from legacy Android `sh` tabs
-- [ ] Configurable extra-keys layouts
+- [x] **Configurable extra-keys layouts** — long-press the row's handle to pick
+      a preset (Full, Minimal, SSH & tmux) or reorder/toggle individual keys;
+      persisted across restarts. Default is the original row. See
+      `ExtraKeys.kt` / `ExtraKeysUi.kt`.
 
 ## License
 
