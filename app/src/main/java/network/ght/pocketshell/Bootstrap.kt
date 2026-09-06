@@ -194,8 +194,8 @@ object Bootstrap {
     private fun provisionCore(context: Context, distro: Distro) {
         val command = when (distro) {
             Distro.Alpine -> "apk update && apk add --no-cache bash openssh-client ca-certificates curl tmux"
-            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive; ${ubuntuApt()} update && " +
-                "${ubuntuApt()} install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
+            Distro.Ubuntu -> "${Userland.ubuntuAptPrelude()}${Userland.ubuntuApt()} update && " +
+                "${Userland.ubuntuApt()} install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
         }
         runGuest(context, distro, command, 240)
     }
@@ -203,16 +203,12 @@ object Bootstrap {
     private fun provisionToolkit(context: Context, distro: Distro) {
         val command = when (distro) {
             Distro.Alpine -> "apk add --no-cache python3 py3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less nodejs npm build-base procps"
-            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive; ${ubuntuApt()} install -y --no-install-recommends " +
+            Distro.Ubuntu -> "${Userland.ubuntuAptPrelude()}${Userland.ubuntuApt()} install -y --no-install-recommends " +
                 "python3 python3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less " +
                 "nodejs npm build-essential procps && rm -rf /var/lib/apt/lists/*"
         }
         runGuest(context, distro, command, 420)
     }
-
-    /** Use only Pocket Shell's signed Ubuntu source, never an inherited stale source file. */
-    private fun ubuntuApt(): String =
-        "apt-get -o Dir::Etc::sourcelist=\"sources.list.d/pocketshell.sources\" -o Dir::Etc::sourceparts=\"-\""
 
     private fun ensureIdentitySync(context: Context, distro: Distro) {
         runGuest(
