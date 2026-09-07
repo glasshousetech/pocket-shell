@@ -55,6 +55,9 @@ on an ARM64 Android phone. A successful Gradle build is not acceptance.
 - Bash, OpenSSH, CA certificates, curl, tmux, Git, Python, Node/npm, editors,
   build tools, and common Unix utilities are mandatory.
 - Setup commands have real wall-clock timeouts while stdout drains concurrently.
+- Every Ubuntu apt run starts with `dpkg --configure -a` so a rootfs whose
+  previous install or repair was interrupted (timeout, swipe-away, reboot) is
+  recovered instead of failing with "dpkg was interrupted".
 - Existing pre-v0.4 rootfs installs are health-checked and repaired in place so
   `~/.ssh` survives, while legacy `sh` session snapshots migrate to Linux.
 - A fresh install generates Ed25519 identity files at modes 0600/0644. Connect

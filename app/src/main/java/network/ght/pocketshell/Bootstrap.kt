@@ -2,6 +2,7 @@ package network.ght.pocketshell
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import android.system.Os
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,6 +24,7 @@ import java.util.concurrent.TimeUnit
  * next attempt starts clean.
  */
 object Bootstrap {
+    private const val TAG = "PocketShell.Bootstrap"
 
     suspend fun install(context: Context, distro: Distro, onStatus: (String) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -94,7 +96,7 @@ object Bootstrap {
                 verifyCore(context, distro)
                 val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
                 Userland.installedMarker(context, distro).writeText("${distro.id} $version schema=${Userland.SETUP_SCHEMA}\n")
-            }
+            }.onFailure { Log.e(TAG, "Linux repair failed for ${distro.id}", it) }
         }
 
     /** Ensures a self-contained keypair exists and returns its public key. */
@@ -194,8 +196,8 @@ object Bootstrap {
     private fun provisionCore(context: Context, distro: Distro) {
         val command = when (distro) {
             Distro.Alpine -> "apk update && apk add --no-cache bash openssh-client ca-certificates curl tmux"
-            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive; ${ubuntuApt()} update && " +
-                "${ubuntuApt()} install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
+            Distro.Ubuntu -> "${Userland.ubuntuAptPrelude()}${Userland.ubuntuApt()} update && " +
+                "${Userland.ubuntuApt()} install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
         }
         runGuest(context, distro, command, 240)
     }
@@ -203,16 +205,12 @@ object Bootstrap {
     private fun provisionToolkit(context: Context, distro: Distro) {
         val command = when (distro) {
             Distro.Alpine -> "apk add --no-cache python3 py3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less nodejs npm build-base procps"
-            Distro.Ubuntu -> "export DEBIAN_FRONTEND=noninteractive; ${ubuntuApt()} install -y --no-install-recommends " +
+            Distro.Ubuntu -> "${Userland.ubuntuAptPrelude()}${Userland.ubuntuApt()} install -y --no-install-recommends " +
                 "python3 python3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less " +
                 "nodejs npm build-essential procps && rm -rf /var/lib/apt/lists/*"
         }
         runGuest(context, distro, command, 420)
     }
-
-    /** Use only Pocket Shell's signed Ubuntu source, never an inherited stale source file. */
-    private fun ubuntuApt(): String =
-        "apt-get -o Dir::Etc::sourcelist=\"sources.list.d/pocketshell.sources\" -o Dir::Etc::sourceparts=\"-\""
 
     private fun ensureIdentitySync(context: Context, distro: Distro) {
         runGuest(
@@ -251,12 +249,13 @@ object Bootstrap {
         }
         pb.redirectErrorStream(true)
         val proc = pb.start()
-        val output = StringBuilder()
+        // Keep the *tail* of the guest output: apt/dpkg print thousands of
+        // progress lines and the failure is always at the end.
+        val tail = GuestOutputTail(maxChars = 24_000)
         val reader = Thread {
-            proc.inputStream.bufferedReader().useLines { lines ->
-                lines.forEach { line -> if (output.length < 16_000) output.appendLine(line) }
-            }
+            proc.inputStream.bufferedReader().useLines { lines -> lines.forEach(tail::append) }
         }.apply { isDaemon = true; start() }
+        val output = tail
         if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
             reader.join(2_000)
@@ -264,7 +263,7 @@ object Bootstrap {
         }
         reader.join(2_000)
         if (proc.exitValue() != 0) {
-            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.takeLast(1_000)}")
+            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.toString().takeLast(2_500)}")
         }
         return output.toString()
     }
