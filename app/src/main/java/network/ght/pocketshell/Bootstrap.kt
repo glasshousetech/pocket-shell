@@ -247,12 +247,13 @@ object Bootstrap {
         }
         pb.redirectErrorStream(true)
         val proc = pb.start()
-        val output = StringBuilder()
+        // Keep the *tail* of the guest output: apt/dpkg print thousands of
+        // progress lines and the failure is always at the end.
+        val tail = GuestOutputTail(maxChars = 24_000)
         val reader = Thread {
-            proc.inputStream.bufferedReader().useLines { lines ->
-                lines.forEach { line -> if (output.length < 16_000) output.appendLine(line) }
-            }
+            proc.inputStream.bufferedReader().useLines { lines -> lines.forEach(tail::append) }
         }.apply { isDaemon = true; start() }
+        val output = tail
         if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
             reader.join(2_000)
@@ -260,7 +261,7 @@ object Bootstrap {
         }
         reader.join(2_000)
         if (proc.exitValue() != 0) {
-            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.takeLast(1_000)}")
+            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.toString().takeLast(2_500)}")
         }
         return output.toString()
     }
