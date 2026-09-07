@@ -2,6 +2,7 @@ package network.ght.pocketshell
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import android.system.Os
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,6 +24,7 @@ import java.util.concurrent.TimeUnit
  * next attempt starts clean.
  */
 object Bootstrap {
+    private const val TAG = "PocketShell.Bootstrap"
 
     suspend fun install(context: Context, distro: Distro, onStatus: (String) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -94,7 +96,7 @@ object Bootstrap {
                 verifyCore(context, distro)
                 val version = if (distro == Distro.Alpine) Userland.ALPINE_VERSION else Userland.UBUNTU_VERSION
                 Userland.installedMarker(context, distro).writeText("${distro.id} $version schema=${Userland.SETUP_SCHEMA}\n")
-            }
+            }.onFailure { Log.e(TAG, "Linux repair failed for ${distro.id}", it) }
         }
 
     /** Ensures a self-contained keypair exists and returns its public key. */
