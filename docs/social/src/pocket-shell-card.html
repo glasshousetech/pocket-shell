@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pocket Shell social card</title>
+<!--
+  Pocket Shell social / store artwork. Rendered to PNG by scripts/render-social.cjs.
+  Formats are selected with ?f=preview|og|square|feature (see the script for pixel sizes).
+
+  Identity rules (Glass Tech Prism, September 2026):
+    - Company lockup is the approved glass-tech-pyramid-lockup-dark artwork, used unmodified
+      apart from dropping its black background rectangle.
+    - Palette: paper #F4F4F4, black, cyan #5FE1FF, violet #7A3CFF, magenta #FF2D6F.
+      The cyan->violet->magenta gradient appears only as the brand rail.
+    - Typography: Inter for headings and body; JetBrains Mono (the app's own terminal font)
+      for terminal-flavoured labels.
+    - The Pocket Shell app identity (#0C0E13 surface, #5B7FFF prompt glyph) is kept as-is:
+      existing app identities were not redrawn in the rebrand.
+-->
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(fonts/Inter-Regular.woff2) format("woff2"); }
+  @font-face { font-family: Inter; font-weight: 500; src: url(fonts/Inter-Medium.woff2) format("woff2"); }
+  @font-face { font-family: Inter; font-weight: 600; src: url(fonts/Inter-SemiBold.woff2) format("woff2"); }
+  @font-face { font-family: Inter; font-weight: 700; src: url(fonts/Inter-Bold.woff2) format("woff2"); }
+  @font-face { font-family: Inter; font-weight: 800; src: url(fonts/Inter-ExtraBold.woff2) format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url(../../../app/src/main/res/font/jbm_regular.ttf) format("truetype"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 500; src: url(../../../app/src/main/res/font/jbm_medium.ttf) format("truetype"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url(../../../app/src/main/res/font/jbm_bold.ttf) format("truetype"); }
+
+  :root {
+    --surface: #0C0E13;         /* Pocket Shell app surface */
+    --tile: #12151F;
+    --line: rgba(244,244,244,.12);
+    --paper: #F4F4F4;           /* Glass Tech paper */
+    --paper-70: rgba(244,244,244,.72);
+    --paper-50: rgba(244,244,244,.5);
+    --prompt: #5B7FFF;          /* Pocket Shell accent */
+    --cyan: #5FE1FF;
+    --violet: #7A3CFF;
+    --magenta: #FF2D6F;
+    --rail: linear-gradient(90deg, var(--cyan), var(--violet) 50%, var(--magenta));
+    --pad: 64px;
+    --title: 92px;
+    --tagline: 36px;
+    --chip: 19px;
+    --eyebrow: 17px;
+    --icon: 104px;
+    --lockup-h: 42px;
+    --url: 20px;
+    --phone-w: 392px;
+    --rail-h: 12px;
+  }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--surface); }
+  body { font-family: Inter, system-ui, sans-serif; color: var(--paper); -webkit-font-smoothing: antialiased; }
+  .card { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+
+  /* Ambient light in the app's own accent, echoing its frosted-glass chrome. */
+  .glow { position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; }
+  .glow--a { width: 520px; height: 520px; right: 8%; top: -240px; background: rgba(91,127,255,.22); }
+  .glow--b { width: 420px; height: 420px; left: -160px; bottom: -180px; background: rgba(91,127,255,.10); }
+
+  .copy { position: absolute; left: var(--pad); top: var(--pad); right: calc(var(--phone-w) + var(--pad) * 1.5); display: flex; flex-direction: column; gap: 22px; }
+  .eyebrow { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: var(--eyebrow); letter-spacing: .18em; text-transform: uppercase; color: var(--cyan); }
+  .eyebrow span { color: var(--paper-50); }
+  .title-row { display: flex; align-items: center; gap: 26px; }
+  .icon { width: var(--icon); height: var(--icon); flex: 0 0 auto; border-radius: 24%; background: var(--tile); box-shadow: inset 0 0 0 1px var(--line), 0 18px 40px rgba(0,0,0,.45); }
+  h1 { margin: 0; font-size: var(--title); font-weight: 800; letter-spacing: -.035em; line-height: .96; }
+  .tagline { margin: 0; font-size: var(--tagline); font-weight: 500; line-height: 1.22; color: var(--paper-70); letter-spacing: -.012em; max-width: 14.5em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px 10px; }
+  .chip { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: var(--chip); line-height: 1; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; color: var(--paper-70); background: rgba(244,244,244,.03); white-space: nowrap; }
+  .chip b { font-weight: 500; color: var(--prompt); margin-right: 8px; }
+
+  .foot { position: absolute; left: var(--pad); right: calc(var(--phone-w) + var(--pad) * 1.5); bottom: calc(var(--rail-h) + var(--pad) * .7); display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+  .lockup { height: var(--lockup-h); display: block; }
+  .url { font-family: "JetBrains Mono", monospace; font-weight: 400; font-size: var(--url); color: var(--paper-50); letter-spacing: .01em; }
+  .url b { font-weight: 500; color: var(--paper-70); }
+
+  .phone { position: absolute; right: var(--pad); top: 76px; width: var(--phone-w); border-radius: 46px; padding: 12px; background: #1A1E2B; box-shadow: inset 0 0 0 1px rgba(244,244,244,.14), 0 40px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.6); }
+  .phone .screen { border-radius: 36px; overflow: hidden; background: #000; }
+  .phone img { display: block; width: 100%; height: auto; }
+
+  .rail { position: absolute; left: 0; right: 0; bottom: 0; height: var(--rail-h); background: var(--rail); z-index: 5; }
+
+  /* ---- Open Graph 1200x630: same layout, slightly tighter ---- */
+  body[data-f="og"] { --title: 88px; --tagline: 34px; --phone-w: 372px; }
+
+  /* ---- Google Play feature graphic 1024x500: compact ---- */
+  body[data-f="feature"] { --pad: 48px; --title: 70px; --tagline: 27px; --chip: 15px; --eyebrow: 14px; --icon: 78px; --lockup-h: 32px; --url: 16px; --phone-w: 300px; --rail-h: 10px; }
+  body[data-f="feature"] .copy { gap: 16px; }
+  body[data-f="feature"] .title-row { gap: 18px; }
+  body[data-f="feature"] .phone { top: 56px; padding: 9px; border-radius: 36px; }
+  body[data-f="feature"] .phone .screen { border-radius: 28px; }
+  body[data-f="feature"] .chip { padding: 9px 12px; }
+  body[data-f="feature"] .glow--a { right: 4%; top: -260px; }
+
+  /* ---- Square 1080x1080: copy on top, phone rising from the bottom ---- */
+  body[data-f="square"] { --pad: 72px; --title: 112px; --tagline: 42px; --chip: 21px; --eyebrow: 19px; --icon: 120px; --lockup-h: 46px; --url: 22px; --phone-w: 560px; --rail-h: 14px; }
+  body[data-f="square"] .copy { right: var(--pad); gap: 26px; }
+  body[data-f="square"] .tagline { max-width: 20em; }
+  body[data-f="square"] .phone { left: 50%; right: auto; top: 640px; transform: translateX(-50%); }
+  body[data-f="square"] .foot { right: var(--pad); bottom: auto; top: 570px; }
+  body[data-f="square"] .glow--a { right: -120px; top: 200px; width: 620px; height: 620px; }
+  body[data-f="square"] .glow--b { left: -200px; bottom: 100px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="glow glow--a"></div>
+  <div class="glow glow--b"></div>
+
+  <div class="copy">
+    <div class="eyebrow">Glass Tech <span>·</span> Developer tools <span>·</span> Android</div>
+    <div class="title-row">
+      <!-- Pocket Shell launcher icon: the adaptive icon's safe zone (72 of 108 dp), same geometry as res/drawable. -->
+      <svg class="icon" viewBox="18 18 72 72" aria-label="Pocket Shell icon">
+        <path d="M38,38 L58,54 L38,70" fill="none" stroke="#5B7FFF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="64" y="62" width="14" height="9" fill="#5B7FFF"/>
+      </svg>
+      <h1>Pocket Shell</h1>
+    </div>
+    <p class="tagline">A real terminal for Android, done right.</p>
+    <div class="chips">
+      <span class="chip"><b>$</b>Real PTY — vim, ssh, htop</span>
+      <span class="chip"><b>$</b>Alpine &amp; Ubuntu userland</span>
+      <span class="chip"><b>$</b>Free &amp; open source (GPLv3)</span>
+    </div>
+  </div>
+
+  <div class="phone">
+    <div class="screen"><img src="shots/pocket-shell-tab-rail.png" alt="Pocket Shell Tab Rail with two live shells and the AI copilot bar"></div>
+  </div>
+
+  <div class="foot">
+    <img class="lockup" src="brand/glass-tech-pyramid-lockup-dark-transparent.svg" alt="Glass Tech">
+    <div class="url"><b>ght.network</b>/software/pocketshell</div>
+  </div>
+
+  <div class="rail"></div>
+</div>
+<script>
+  const f = new URL(location.href).searchParams.get('f') || 'preview';
+  document.body.dataset.f = f;
+</script>
+</body>
+</html>

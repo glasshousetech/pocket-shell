@@ -1,6 +1,8 @@
 # Pocket Shell
 
-A fast, good-looking terminal emulator for Android — by Glass House Technologies.
+![Pocket Shell — a real terminal for Android, by Glass Tech](docs/social/pocket-shell-social-preview.png)
+
+A fast, good-looking terminal emulator for Android — by [Glass Tech](https://ght.network/software/pocketshell).
 
 Pocket Shell pairs a **real PTY-backed terminal** (so `vim`, `ssh`, `htop`, `less`, and
 tab-completion all work) with a modern **Tab Rail** multi-session UI and a Kali-style
@@ -83,6 +85,13 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
       a preset (Full, Minimal, SSH & tmux) or reorder/toggle individual keys;
       persisted across restarts. Default is the original row. See
       `ExtraKeys.kt` / `ExtraKeysUi.kt`.
+
+## Brand & social assets
+
+Ready-to-post artwork in the Glass Tech identity lives in [`docs/social/`](docs/social/README.md):
+GitHub social preview (1280×640), Open Graph / LinkedIn / X card (1200×630), square feed
+post (1080×1080) and Google Play feature graphic (1024×500). They are rendered from one HTML
+template with `node scripts/render-social.cjs`; edit the template, not the PNGs.
 
 ## License
 

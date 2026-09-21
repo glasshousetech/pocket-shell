@@ -28,3 +28,13 @@ against a pinned sha256 independently recomputed from the downloaded tarball
 (see `Userland.kt`). Ubuntu is licensed under a mix of open-source licenses
 (GPL, LGPL, etc. per package) — see https://ubuntu.com/legal. Not redistributed
 in the repo — downloaded on demand.
+
+## JetBrains Mono — bundled terminal font
+`app/src/main/res/font/jbm_regular.ttf`, `jbm_medium.ttf`, `jbm_bold.ttf`.
+https://github.com/JetBrains/JetBrainsMono — **SIL Open Font License 1.1.** Also used for
+terminal-flavoured labels in the social artwork under `docs/social/`.
+
+## Inter — social artwork font (not shipped in the app)
+`docs/social/src/fonts/Inter-*.woff2` (Inter 4.1), used only to render the marketing
+images in `docs/social/`. https://github.com/rsms/inter — **SIL Open Font License 1.1**
+(`docs/social/src/fonts/LICENSE-Inter.txt`). Not part of the APK.
