@@ -25,6 +25,10 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # The SDK repo dropped the legacy 'tools' package; the action's default
+          # ('tools platform-tools') now fails at `sdkmanager tools` before Gradle runs.
+          packages: platform-tools
 
       - name: Gradle cache
         uses: actions/cache@v4
@@ -62,6 +66,10 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # The SDK repo dropped the legacy 'tools' package; the action's default
+          # ('tools platform-tools') now fails at `sdkmanager tools` before Gradle runs.
+          packages: platform-tools
 
       - name: Gradle cache
         uses: actions/cache@v4
@@ -109,6 +117,10 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # The SDK repo dropped the legacy 'tools' package; the action's default
+          # ('tools platform-tools') now fails at `sdkmanager tools` before Gradle runs.
+          packages: platform-tools
 
       - name: Gradle cache
         uses: actions/cache@v4
