@@ -19,9 +19,12 @@ class TerminalWorkspaceUiTest {
     @Test fun textEditorInsertsWithoutRunningAndActivityRecreationKeepsSession() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         org.junit.Assume.assumeTrue("Run the workspace fixture only on an isolated emulator",
-            android.os.Build.MODEL.contains("sdk_gphone") || android.os.Build.FINGERPRINT.startsWith("generic"))
+            android.os.Build.MODEL.contains("sdk_gphone") || android.os.Build.FINGERPRINT.startsWith("generic") ||
+                android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         val context = instrumentation.targetContext
         val device = UiDevice.getInstance(instrumentation)
+        val previousImeSetting = device.executeShellCommand("settings get secure show_ime_with_hard_keyboard").trim()
+        device.executeShellCommand("settings put secure show_ime_with_hard_keyboard 1")
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             device.executeShellCommand("pm grant ${context.packageName} android.permission.POST_NOTIFICATIONS")
         }
@@ -105,6 +108,8 @@ class TerminalWorkspaceUiTest {
                     device.wait(Until.hasObject(By.textContains("This session has ended.")), 4000))
             }
         } finally {
+            if (previousImeSetting == "null") device.executeShellCommand("settings delete secure show_ime_with_hard_keyboard")
+            else device.executeShellCommand("settings put secure show_ime_with_hard_keyboard $previousImeSetting")
             device.setOrientationNatural()
             device.unfreezeRotation()
             instrumentation.runOnMainSync { service.closeSession(fixture) }
