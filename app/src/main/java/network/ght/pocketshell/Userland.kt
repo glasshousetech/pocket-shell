@@ -96,6 +96,19 @@ object Userland {
     }
 
     /** First device ABI we have both a proot binary and a rootfs for, for this distro. */
+    /**
+     * Shell prelude for every Ubuntu apt run. A guest apt/dpkg that was killed
+     * mid-flight (timeout, app swipe, reboot) leaves dpkg interrupted, and apt
+     * then refuses to do anything until `dpkg --configure -a` has run. Repairing
+     * that state up front keeps install and repair idempotent.
+     */
+    fun ubuntuAptPrelude(): String =
+        "export DEBIAN_FRONTEND=noninteractive; dpkg --configure -a || true; "
+
+    /** Use only Pocket Shell's signed Ubuntu source, never an inherited stale source file. */
+    fun ubuntuApt(): String =
+        "apt-get -o Dir::Etc::sourcelist=\"sources.list.d/pocketshell.sources\" -o Dir::Etc::sourceparts=\"-\""
+
     fun supportedAbi(distro: Distro): String? = Build.SUPPORTED_ABIS.firstOrNull { rootfsMap(distro).containsKey(it) }
     fun rootfsFor(distro: Distro, abi: String): Rootfs? = rootfsMap(distro)[abi]
 

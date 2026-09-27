@@ -15,13 +15,14 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "network.ght.pocketshell"
     compileSdk = 34
+    testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
 
     defaultConfig {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.4.0-rc.2"
+        versionCode = 12
+        versionName = "0.4.0-rc.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

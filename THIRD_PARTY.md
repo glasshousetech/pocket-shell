@@ -9,11 +9,19 @@ Android* code is Apache-2.0). Source: https://github.com/termux/termux-app
 
 ## proot — bundled native binaries
 `app/src/main/jniLibs/<abi>/libproot.so`, `libproot-loader.so`, `libproot-loader32.so`.
-Android builds of proot (userland loader variant), from
+Android builds of standard proot (with the external loader), from
 https://github.com/green-green-avk/build-proot-android
 (proot upstream: https://github.com/proot-me/proot). **GPLv2.**
 These are the only files Android permits an app to execute, so they ship in the
 native-lib dir rather than being downloaded.
+
+The binaries are pinned to build-proot-android commit
+`01f83b8841358450c78333d1b33ab30d4943bec4`, package member `root/bin/proot`.
+Do not substitute `root/bin/proot-userland`: its USERLAND-only fake-root stat
+handler reads statx's directory descriptor as a pathname, producing EFAULT on
+Ubuntu 24.04 (`ls`, Node filesystem operations, and npm). Standard PRoot retains
+the `-0` fake-root mode without that defective metadata extension. Matching
+external loaders remain from the same upstream packages.
 
 ## Alpine Linux — downloaded at first use (optional distro)
 `alpine-minirootfs-3.20.10-<arch>.tar.gz`, fetched from
