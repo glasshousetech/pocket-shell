@@ -35,3 +35,7 @@ The changes were developed from a copy of the existing uncommitted rc.6 checkout
 - Keyboard visibility and window focus: https://developer.android.com/develop/ui/views/touch-and-input/keyboard-input/visibility
 - Android EditorInfo: https://developer.android.com/reference/android/view/inputmethod/EditorInfo
 - tmux mouse and copy-mode behavior: https://github.com/tmux/tmux/wiki/FAQ
+
+## Release pipeline repair
+
+The September 27 CI and release runs stopped before compilation with `Warning: Failed to find package 'tools'`. Google removed that legacy SDK package, while setup-android v3 still requests it by default. Set `packages: platform-tools` explicitly in every setup-android step; command-line tools are already installed by the action. Upstream explanation: https://github.com/android-actions/setup-android#the-deprecated-tools-package. No APK was produced by the failed runs. The unpublished 0.4.1 tag was corrected to include this workflow repair before rerunning.
