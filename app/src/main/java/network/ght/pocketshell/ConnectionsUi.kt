@@ -45,7 +45,9 @@ data class SshProfile(
         val session = tmuxSession.trim()
         return if (session.isEmpty()) base else {
             require(session.matches(Regex("[A-Za-z0-9._-]+"))) { "tmux session contains unsupported characters." }
-            "$base \"tmux new-session -A -s $session\""
+            // Mouse routing is session-scoped; do not alter other server sessions.
+            // Quote the remote shell argument, and escape tmux's command separator.
+            "$base 'tmux new-session -A -s $session \\; set-option -t $session mouse on'"
         }
     }
 }

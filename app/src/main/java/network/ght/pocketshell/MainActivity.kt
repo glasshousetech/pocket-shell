@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -124,7 +123,6 @@ private fun Splash() {
 
 @Composable
 private fun PocketShellApp(service: TermService, keyImportMessage: String?, onImportKey: () -> Unit) {
-    val configuration = LocalConfiguration.current // recomposes on config change
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
     val fontPx = remember { with(density) { 13.sp.toPx() }.toInt().coerceAtLeast(18) }
@@ -147,6 +145,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     var extraKeysOpen by remember { mutableStateOf(true) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
+    var textInputSessionId by remember { mutableStateOf<Int?>(null) }
+    val textDrafts = remember { mutableStateMapOf<Int, String>() }
     // Persisted extra-keys layout (preset or customized); default is the
     // original hardcoded row, so nothing changes until the user picks one.
     var extraKeys by remember { mutableStateOf(ExtraKeysLayouts.saved(ctx)) }
@@ -154,6 +154,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     val termViewRef = remember { mutableStateOf<TerminalView?>(null) }
     val viewClient = remember { RailViewClient(ctx, fontPx) }
+    var terminalInAlternateBuffer by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var setupStatus by remember { mutableStateOf<String?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
@@ -175,8 +176,22 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     var aiIsCommand by remember { mutableStateOf(true) }
 
     // Repaint the visible terminal when its session's screen changes.
-    LaunchedEffect(Unit) {
-        service.onRedraw = { s -> termViewRef.value?.let { if (it.currentSession === s) it.onScreenUpdated() } }
+    DisposableEffect(service) {
+        service.onRedraw = { s ->
+            termViewRef.value?.let {
+                if (it.currentSession === s) {
+                    terminalInAlternateBuffer = s.emulator?.isAlternateBufferActive == true
+                    TerminalInteraction.redraw(it)
+                }
+            }
+        }
+        onDispose { service.onRedraw = null }
+    }
+    LaunchedEffect(sessions.getOrNull(activeIndex)?.id) {
+        viewClient.clearStickyModifiers()
+        ctrlMenuOpen = false
+        altMenuOpen = false
+        textInputSessionId = null
     }
     LaunchedEffect(distroPickerOpen, connectionsOpen, settingsOpen, themeOpen, linuxManageOpen, keysDialogOpen) {
         if (distroPickerOpen || connectionsOpen || settingsOpen || themeOpen || linuxManageOpen || keysDialogOpen) {
@@ -262,6 +277,9 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     LaunchedEffect(Unit) {
+        // A recreated Activity must reattach to its live foreground-service PTYs.
+        // Re-running setup here used to close every SSH connection on recreation.
+        if (service.sessions.any { it.alive.value && it.mode == SessionMode.LINUX }) return@LaunchedEffect
         val distro = Userland.installedDistro(ctx)
         if (distro == null) {
             service.sessions.toList().forEach(service::closeSession)
@@ -333,14 +351,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     val active = sessions[activeIndex.coerceIn(0, sessions.size - 1)]
 
-    // Reflects whether a hardware keyboard is actually attached right now.
-    val hardwareKeyboardAttached = configuration.keyboard == Configuration.KEYBOARD_QWERTY &&
-        configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
-
-    fun sendKey(code: Int) { termViewRef.value?.handleKeyCode(code, 0) }
+    fun sendKey(code: Int) { viewClient.sendKey(code) }
     fun sendCtrl(cp: Int) { termViewRef.value?.inputCodePoint(cp, true, false); ctrlMenuOpen = false }
     fun sendAlt(cp: Int) { termViewRef.value?.inputCodePoint(cp, false, true); altMenuOpen = false }
-    fun sendLiteral(ch: Char) { termViewRef.value?.inputCodePoint(ch.code, false, false) }
+    fun sendLiteral(ch: Char) { termViewRef.value?.inputCodePoint(if (viewClient.shiftDown) ch.uppercaseChar().code else ch.code, false, false) }
 
     fun terminalText(): String? =
         runCatching { active.session.emulator?.screen?.transcriptText }.getOrNull()
@@ -376,14 +390,14 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             distroPickerOpen = true
             return
         }
-        val holder = service.newSession(SessionMode.LINUX)
+        // Start SSH as the PTY process's command. A fixed delay could type the
+        // command into an unready shell, or steal focus after a tab switch.
+        val holder = service.newSession(SessionMode.LINUX, startupCommand = profile.command())
         activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
-        scope.launch {
-            delay(450)
-            holder.session.write(profile.command() + "\n")
-            termViewRef.value?.let { view ->
-                view.attachSession(holder.session); view.onScreenUpdated(); view.requestFocus(); viewClient.showKeyboard()
-            }
+        termViewRef.value?.let { view ->
+            view.attachSession(holder.session)
+            view.onScreenUpdated()
+            viewClient.showKeyboard()
         }
     }
 
@@ -458,36 +472,81 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             )
         }
 
-        if (!hardwareKeyboardAttached) {
-            AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
-                when {
-                    ctrlMenuOpen -> CtrlMenu(onKey = { cp -> sendCtrl(cp) }, onBack = { ctrlMenuOpen = false })
-                    altMenuOpen -> AltMenu(onKey = { cp -> sendAlt(cp) }, onBack = { altMenuOpen = false })
-                    else -> ExtraKeysRow(
-                        keys = extraKeys,
-                        onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
-                        onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
-                        onCtrl = { ctrlMenuOpen = true },
-                        onAlt = { altMenuOpen = true },
-                        onLiteral = { ch -> sendLiteral(ch) },
-                        onUp = { sendKey(KeyEvent.KEYCODE_DPAD_UP) },
-                        onDown = { sendKey(KeyEvent.KEYCODE_DPAD_DOWN) },
-                        onLeft = { sendKey(KeyEvent.KEYCODE_DPAD_LEFT) },
-                        onRight = { sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) },
-                        onHome = { sendKey(KeyEvent.KEYCODE_MOVE_HOME) },
-                        onEnd = { sendKey(KeyEvent.KEYCODE_MOVE_END) },
-                        onPgUp = { sendKey(KeyEvent.KEYCODE_PAGE_UP) },
-                        onPgDown = { sendKey(KeyEvent.KEYCODE_PAGE_DOWN) },
-                        onDel = { sendKey(KeyEvent.KEYCODE_FORWARD_DEL) },
-                    )
+        Row(
+            Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                KeyChip("History ↑") { termViewRef.value?.let { TerminalInteraction.pageHistory(it, up = true) } }
+                KeyChip("History ↓") { termViewRef.value?.let { TerminalInteraction.pageHistory(it, up = false) } }
+                if (!terminalInAlternateBuffer) {
+                    KeyChip("Live") { termViewRef.value?.let(TerminalInteraction::followOutput) }
                 }
             }
-            ExtraKeysHandle(
-                open = extraKeysOpen,
-                onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false; altMenuOpen = false },
-                onLongClick = { keysDialogOpen = true },
-            )
+            KeyChip("Text / voice") {
+                viewClient.clearStickyModifiers()
+                textInputSessionId = active.id
+            }
         }
+
+        // Keep terminal controls available even when Android reports a hardware keyboard.
+        AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
+            when {
+                ctrlMenuOpen -> CtrlMenu(onKey = { cp -> sendCtrl(cp) }, onBack = { ctrlMenuOpen = false })
+                altMenuOpen -> AltMenu(onKey = { cp -> sendAlt(cp) }, onBack = { altMenuOpen = false })
+                else -> ExtraKeysRow(
+                    keys = extraKeys,
+                    onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
+                    onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
+                    onCtrl = { viewClient.toggleCtrl() },
+                    onAlt = { viewClient.toggleAlt() },
+                    onShift = { viewClient.toggleShift() },
+                    ctrlActive = viewClient.ctrlDown,
+                    altActive = viewClient.altDown,
+                    shiftActive = viewClient.shiftDown,
+                    onCtrlLongPress = { ctrlMenuOpen = true },
+                    onAltLongPress = { altMenuOpen = true },
+                    onLiteral = { ch -> sendLiteral(ch) },
+                    onUp = { sendKey(KeyEvent.KEYCODE_DPAD_UP) },
+                    onDown = { sendKey(KeyEvent.KEYCODE_DPAD_DOWN) },
+                    onLeft = { sendKey(KeyEvent.KEYCODE_DPAD_LEFT) },
+                    onRight = { sendKey(KeyEvent.KEYCODE_DPAD_RIGHT) },
+                    onHome = { sendKey(KeyEvent.KEYCODE_MOVE_HOME) },
+                    onEnd = { sendKey(KeyEvent.KEYCODE_MOVE_END) },
+                    onPgUp = { sendKey(KeyEvent.KEYCODE_PAGE_UP) },
+                    onPgDown = { sendKey(KeyEvent.KEYCODE_PAGE_DOWN) },
+                    onDel = { sendKey(KeyEvent.KEYCODE_FORWARD_DEL) },
+                )
+            }
+        }
+        ExtraKeysHandle(
+            open = extraKeysOpen,
+            onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false; altMenuOpen = false },
+            onLongClick = { keysDialogOpen = true },
+        )
+    }
+
+    val textTarget = sessions.firstOrNull { it.id == textInputSessionId }
+    if (textTarget != null) {
+        TextInputDialog(
+            value = textDrafts[textTarget.id].orEmpty(),
+            onValueChange = { textDrafts[textTarget.id] = it },
+            onInsert = {
+                val text = TerminalInteraction.reviewedText(textDrafts[textTarget.id].orEmpty())
+                if (textTarget.alive.value && textTarget.session.emulator != null) {
+                    viewClient.clearStickyModifiers()
+                    textTarget.session.emulator.paste(text)
+                    textDrafts.remove(textTarget.id)
+                    textInputSessionId = null
+                    termViewRef.value?.let(TerminalInteraction::followOutput)
+                    viewClient.showKeyboard()
+                } else {
+                    textInputSessionId = null
+                    setupError = "This session has ended. Reconnect before inserting text. Your draft is still in Text / voice for this tab."
+                }
+            },
+            onDismiss = { textInputSessionId = null; viewClient.showKeyboard() },
+        )
     }
 
     if (settingsOpen) {
@@ -792,6 +851,12 @@ private fun ExtraKeysRow(
     onTab: () -> Unit,
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
+    onShift: () -> Unit,
+    ctrlActive: Boolean,
+    altActive: Boolean,
+    shiftActive: Boolean,
+    onCtrlLongPress: () -> Unit,
+    onAltLongPress: () -> Unit,
     onLiteral: (Char) -> Unit,
     onUp: () -> Unit,
     onDown: () -> Unit,
@@ -819,8 +884,9 @@ private fun ExtraKeysRow(
                 when (key) {
                     ExtraKeysLayouts.ESC -> KeyChip(key.label, onClick = onEsc)
                     ExtraKeysLayouts.TAB -> KeyChip(key.label, onClick = onTab)
-                    ExtraKeysLayouts.CTRL -> KeyChip(key.label, onClick = onCtrl)
-                    ExtraKeysLayouts.ALT -> KeyChip(key.label, onClick = onAlt)
+                    ExtraKeysLayouts.CTRL -> KeyChip(key.label, active = ctrlActive, onLongClick = onCtrlLongPress, onClick = onCtrl)
+                    ExtraKeysLayouts.ALT -> KeyChip(key.label, active = altActive, onLongClick = onAltLongPress, onClick = onAlt)
+                    ExtraKeysLayouts.SHIFT -> KeyChip(key.label, active = shiftActive, onClick = onShift)
                     ExtraKeysLayouts.LEFT -> KeyChip(key.label, onClick = onLeft)
                     ExtraKeysLayouts.DOWN -> KeyChip(key.label, onClick = onDown)
                     ExtraKeysLayouts.UP -> KeyChip(key.label, onClick = onUp)
@@ -875,14 +941,16 @@ private fun AltMenu(onKey: (Int) -> Unit, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun KeyChip(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun KeyChip(label: String, modifier: Modifier = Modifier, active: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(RailKeyChip)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+            .background(if (active) RailAccent.copy(alpha = 0.45f) else RailKeyChip)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 11.sp)

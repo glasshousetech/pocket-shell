@@ -21,8 +21,8 @@ android {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.4.0-rc.6"
+        versionCode = 13
+        versionName = "0.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

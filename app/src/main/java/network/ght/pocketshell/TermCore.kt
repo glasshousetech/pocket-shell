@@ -41,6 +41,7 @@ object TermCore {
         context: Context,
         mode: SessionMode,
         cwd: String? = null,
+        startupCommand: String? = null,
         onRedraw: (TerminalSession) -> Unit,
         onTitle: (TerminalSession) -> Unit,
         onFinished: (TerminalSession) -> Unit,
@@ -58,13 +59,13 @@ object TermCore {
                 // defensively (should be unreachable — the UI only offers a
                 // LINUX session once Bootstrap.install has set a marker).
                 val distro = Userland.installedDistro(context) ?: Distro.Alpine
-                val args = Userland.prootArgs(context, distro)
+                val args = Userland.prootArgs(context, distro, startupCommand)
                 TerminalSession(
                     args[0],                    // proot binary
                     home,                       // host cwd
                     args,                       // full proot argv
                     Userland.prootEnv(context),
-                    4000,
+                    20000,
                     client,
                 )
             }
@@ -88,7 +89,7 @@ object TermCore {
                     startDir,
                     arrayOf(shell, "-i"),
                     env,
-                    4000,
+                    20000,
                     client,
                 )
             }

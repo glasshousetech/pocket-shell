@@ -8,10 +8,10 @@ import org.junit.Test
 class ExtraKeysLayoutsTest {
 
     @Test
-    fun defaultPresetMatchesTheOriginalHardcodedRow() {
+    fun defaultPresetIncludesModifiersAndNavigation() {
         assertEquals(
             listOf(
-                "esc", "tab", "ctrl", "alt",
+                "esc", "tab", "ctrl", "alt", "shift",
                 "left", "down", "up", "right",
                 "home", "end", "pgup", "pgdn", "del",
                 "dash", "underscore", "tilde", "slash", "pipe", "colon",

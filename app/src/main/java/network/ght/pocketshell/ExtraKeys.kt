@@ -20,17 +20,16 @@ data class ExtraKey(
  * comma-separated list of key ids in plain SharedPreferences (not secret),
  * same file as the terminal theme.
  *
- * [ExtraKeysLayouts.DEFAULT] is exactly the row that was hardcoded before
- * this setting existed, so nothing changes for existing users.
+ * Presets include one-shot modifiers. Explicitly customized rows keep their saved order.
  */
 object ExtraKeysLayouts {
 
-    // Key catalog. The DEFAULT preset's order below is the historical
-    // hardcoded order — do not reorder it.
+    // Key catalog. Preserve the established order when adding controls.
     val ESC = ExtraKey("esc", "ESC")
     val TAB = ExtraKey("tab", "TAB")
     val CTRL = ExtraKey("ctrl", "CTRL")
     val ALT = ExtraKey("alt", "ALT")
+    val SHIFT = ExtraKey("shift", "SHIFT")
     val LEFT = ExtraKey("left", "←")
     val DOWN = ExtraKey("down", "↓")
     val UP = ExtraKey("up", "↑")
@@ -43,7 +42,7 @@ object ExtraKeysLayouts {
 
     /** Every key that can appear in the row, in default order. */
     val ALL: List<ExtraKey> = listOf(
-        ESC, TAB, CTRL, ALT,
+        ESC, TAB, CTRL, ALT, SHIFT,
         LEFT, DOWN, UP, RIGHT,
         HOME, END, PGUP, PGDN, DEL,
         ExtraKey("dash", "-", '-'),
@@ -62,20 +61,20 @@ object ExtraKeysLayouts {
 
     data class Preset(val id: String, val label: String, val blurb: String, val keys: List<ExtraKey>)
 
-    /** The original hardcoded row — the default for existing installs. */
+    /** Full row, including one-shot CTRL / ALT / SHIFT. */
     val DEFAULT = Preset("default", "Full (default)", "Everything: nav, paging, and shell punctuation.", ALL)
 
     /** Just the essentials — ESC/TAB, modifiers, arrows. */
     val MINIMAL = Preset(
-        "minimal", "Minimal", "ESC, TAB, CTRL, ALT, and arrows only.",
-        listOf(ESC, TAB, CTRL, ALT, LEFT, DOWN, UP, RIGHT),
+        "minimal", "Minimal", "ESC, TAB, CTRL, ALT, SHIFT, and arrows only.",
+        listOf(ESC, TAB, CTRL, ALT, SHIFT, LEFT, DOWN, UP, RIGHT),
     )
 
     /** Tuned for ssh + tmux: scrollback paging and the keys remote shells lean on. */
     val SSH_TMUX = Preset(
         "ssh_tmux", "SSH & tmux", "Nav + paging, pipe, tilde, dash, slash.",
         listOf(
-            ESC, TAB, CTRL, ALT,
+            ESC, TAB, CTRL, ALT, SHIFT,
             LEFT, DOWN, UP, RIGHT,
             PGUP, PGDN,
             ALL.first { it.id == "pipe" },

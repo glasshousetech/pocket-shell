@@ -14,7 +14,8 @@ class SshProfileTest {
         assertTrue(command.contains("-o IdentitiesOnly=yes"))
         assertTrue(command.contains("-o StrictHostKeyChecking=accept-new"))
         assertTrue(command.contains("connor@agent.ght.network"))
-        assertTrue(command.endsWith("\"tmux new-session -A -s agents\""))
+        assertTrue(command.contains("tmux new-session -A -s agents"))
+        assertTrue(command.contains("set-option -t agents mouse on"))
     }
 
     @Test

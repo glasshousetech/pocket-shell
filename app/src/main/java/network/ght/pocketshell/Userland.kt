@@ -180,11 +180,14 @@ object Userland {
     }
 
     /** argv that boots an interactive login shell inside [distro]'s rootfs. */
-    fun prootArgs(context: Context, distro: Distro): Array<String> =
-        baseArgs(context, distro) + arrayOf(
-            if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh",
-            "-l",
-        )
+    fun prootArgs(context: Context, distro: Distro, startupCommand: String? = null): Array<String> {
+        val shell = if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh"
+        return baseArgs(context, distro) + interactiveShellArgs(shell, startupCommand)
+    }
+
+    internal fun interactiveShellArgs(shell: String, startupCommand: String?): Array<String> =
+        if (startupCommand == null) arrayOf(shell, "-l")
+        else arrayOf(shell, "-lc", startupCommand)
 
     /** argv that runs [command] non-interactively inside [distro]'s rootfs (no PTY; used for provisioning). */
     fun prootExecArgs(context: Context, distro: Distro, command: String): Array<String> =

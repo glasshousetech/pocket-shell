@@ -38,7 +38,7 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -91,7 +91,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: >
             ./gradlew :app:connectedDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.TerminalSmokeTest
+            -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest
             --no-daemon --stacktrace
 
   screenshots:

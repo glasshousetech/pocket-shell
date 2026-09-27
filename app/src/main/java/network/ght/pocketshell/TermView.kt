@@ -6,8 +6,13 @@ import android.content.Context
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.termux.terminal.KeyHandler
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
@@ -48,23 +53,73 @@ class RailViewClient(
     private val maxFontPx = (defaultFontPx * 2.2f).roundToInt()
 
     /** Sticky modifiers toggled by the extra-keys row. Consumed after one key. */
-    var ctrlDown = false
-    var altDown = false
-    var shiftDown = false
-    var fnDown = false
+    var ctrlDown by mutableStateOf(false)
+    var altDown by mutableStateOf(false)
+    var shiftDown by mutableStateOf(false)
+    var fnDown by mutableStateOf(false)
 
     fun clearStickyModifiers() {
         ctrlDown = false; altDown = false; shiftDown = false; fnDown = false
     }
 
+    fun toggleCtrl() { ctrlDown = !ctrlDown }
+    fun toggleAlt() { altDown = !altDown }
+    fun toggleShift() { shiftDown = !shiftDown }
+
+    fun sendKey(keyCode: Int): Boolean {
+        val v = view ?: return false
+        if (v.currentSession?.emulator == null) return false
+        var modifiers = 0
+        if (ctrlDown) modifiers = modifiers or KeyHandler.KEYMOD_CTRL
+        if (altDown) modifiers = modifiers or KeyHandler.KEYMOD_ALT
+        if (shiftDown) modifiers = modifiers or KeyHandler.KEYMOD_SHIFT
+        val handled = TerminalInteraction.sendKey(v, keyCode, modifiers)
+        if (handled) {
+            clearStickyModifiers()
+            TerminalInteraction.followOutput(v)
+        }
+        return handled
+    }
+
+    private var keyboardFocusListener: ViewTreeObserver.OnWindowFocusChangeListener? = null
+
+    private fun clearKeyboardFocusRequest() {
+        keyboardFocusListener?.let { listener ->
+            view?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(listener)
+        }
+        keyboardFocusListener = null
+    }
+
     fun showKeyboard() {
         val v = view ?: return
+        clearKeyboardFocusRequest()
         v.requestFocus()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+        fun showAfterFocusDispatch() {
+            // Android connects the IME after dispatching window-focus listeners.
+            v.post {
+                if (v.isAttachedToWindow && v.hasFocus() && v.hasWindowFocus()) {
+                    imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+        }
+        if (v.hasWindowFocus()) {
+            showAfterFocusDispatch()
+        } else {
+            // A dialog still owns the window during its Insert/Close callback.
+            // Show the keyboard when Android returns focus, not after an arbitrary delay.
+            keyboardFocusListener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+                if (hasFocus) {
+                    clearKeyboardFocusRequest()
+                    showAfterFocusDispatch()
+                }
+            }
+            v.viewTreeObserver.addOnWindowFocusChangeListener(keyboardFocusListener)
+        }
     }
 
     fun hideKeyboard() {
+        clearKeyboardFocusRequest()
         val v = view ?: return
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.hideSoftInputFromWindow(v.windowToken, 0)
@@ -105,7 +160,26 @@ class RailViewClient(
         Toast.makeText(context, "Selected — drag the handles to adjust, then tap Copy", Toast.LENGTH_LONG).show()
     }
 
-    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
+        val v = view ?: return false
+        // Let the engine process hardware modifiers, AltGr, and character composition.
+        // Its special-key path does not call onCodePoint, so consume our one-shot
+        // state here only when KeyHandler actually has an escape sequence.
+        if (KeyEvent.isModifierKey(keyCode)) return false
+        TerminalInteraction.followOutput(v)
+        if (ctrlDown || altDown || shiftDown || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN) {
+            var modifiers = 0
+            if (ctrlDown || e.isCtrlPressed) modifiers = modifiers or KeyHandler.KEYMOD_CTRL
+            if (altDown || e.isAltPressed) modifiers = modifiers or KeyHandler.KEYMOD_ALT
+            if (shiftDown || e.isShiftPressed) modifiers = modifiers or KeyHandler.KEYMOD_SHIFT
+            if (e.isNumLockOn) modifiers = modifiers or KeyHandler.KEYMOD_NUM_LOCK
+            if (!e.isFunctionPressed && TerminalInteraction.sendKey(v, keyCode, modifiers)) {
+                clearStickyModifiers()
+                return true
+            }
+        }
+        return false
+    }
     override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
 
     // Returning false lets TerminalView run its own default long-press
@@ -120,6 +194,7 @@ class RailViewClient(
     override fun readFnKey(): Boolean = fnDown
 
     override fun onCodePoint(codePoint: Int, ctrlDownFromEvent: Boolean, session: TerminalSession): Boolean {
+        view?.let(TerminalInteraction::followOutput)
         // A real character was committed; a one-shot sticky modifier is now spent.
         if (ctrlDown || altDown || shiftDown || fnDown) clearStickyModifiers()
         return false

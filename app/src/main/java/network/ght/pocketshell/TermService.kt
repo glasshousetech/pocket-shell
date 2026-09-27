@@ -89,7 +89,7 @@ class TermService : Service() {
         return START_STICKY
     }
 
-    fun newSession(mode: SessionMode): TermSession {
+    fun newSession(mode: SessionMode, startupCommand: String? = null): TermSession {
         val id = nextId++
         val prefix = if (mode == SessionMode.LINUX) "linux" else "sh"
         val label = mutableStateOf("$prefix $id")
@@ -97,6 +97,7 @@ class TermService : Service() {
         val session = TermCore.newSession(
             this,
             mode,
+            startupCommand = startupCommand,
             onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, mode, s) },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { alive.value = false; refreshNotification() },
