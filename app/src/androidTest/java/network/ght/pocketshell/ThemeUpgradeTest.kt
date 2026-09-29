@@ -21,7 +21,7 @@ class ThemeUpgradeTest {
             assertEquals("preserve-me", prefs.getString("theme_upgrade_neighbor", null))
             assertEquals("existing-app-private-data", marker.readText())
             val info = context.packageManager.getPackageInfo(context.packageName, 0)
-            assertTrue("The previous 0.4.1 APK must have been replaced", info.longVersionCode >= 14)
+            assertTrue("The prior release APK must have been replaced", info.longVersionCode >= 15)
         }
     }
 }

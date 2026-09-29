@@ -42,7 +42,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.res.ResourcesCompat
 import network.ght.pocketshell.ui.*
 import com.termux.terminal.TerminalSession
-import com.termux.view.TerminalView
+import network.ght.pocketshell.term.TerminalView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -556,6 +556,9 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                 copilotOpen = true
             },
             onDismiss = { settingsOpen = false },
+            // Re-negotiate the IME contract immediately so the keyboard on screen picks the
+            // new mode up, instead of only the next one the user opens.
+            onKeyboardModeChanged = { viewClient.refreshIme() },
         )
     }
 

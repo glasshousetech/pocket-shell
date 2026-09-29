@@ -11,7 +11,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.termux.terminal.TextStyle
-import com.termux.view.TerminalView
+import network.ght.pocketshell.term.TerminalView
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test

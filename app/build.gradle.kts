@@ -21,7 +21,7 @@ android {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
+        versionCode = 15
         versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -87,10 +87,15 @@ dependencies {
     // Encrypted storage for the user's Anthropic API key (AI copilot, BYO-key).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Real terminal engine: native PTY + VT100/xterm emulator + Android view.
-    // Prebuilt .so for all ABIs ships in the AAR — no NDK needed. GPLv3.
-    // terminal-emulator is pulled in transitively.
-    implementation("com.termux.termux-app:terminal-view:0.118.0")
+    // Real terminal engine: native PTY + VT100/xterm emulator. Prebuilt .so for
+    // all ABIs ships in the AAR — no NDK needed. GPLv3.
+    //
+    // The matching terminal-view module is NOT a dependency: its TerminalView is
+    // final and exposes no hook for the EditorInfo it hands the soft keyboard, so
+    // it is vendored into network.ght.pocketshell.term instead. See the README in
+    // that package for the provenance and the list of local changes.
+    implementation("com.termux.termux-app:terminal-emulator:0.118.0")
+    implementation("androidx.annotation:annotation:1.8.0")
 
     testImplementation("junit:junit:4.13.2")
 

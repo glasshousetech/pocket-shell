@@ -2,7 +2,7 @@ package network.ght.pocketshell
 
 import android.content.Context
 import android.widget.FrameLayout
-import com.termux.view.TerminalView
+import network.ght.pocketshell.term.TerminalView
 
 /** Wrap the final Termux view, which resets history in onSizeChanged/updateSize. */
 class TerminalViewport(context: Context) : FrameLayout(context) {

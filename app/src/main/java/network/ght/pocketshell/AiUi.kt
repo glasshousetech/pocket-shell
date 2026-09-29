@@ -135,6 +135,7 @@ fun SettingsDialog(
     initialBase: String,
     onSave: (String, String, String) -> Unit,
     onDismiss: () -> Unit,
+    onKeyboardModeChanged: () -> Unit = {},
 ) {
     var key by remember { mutableStateOf(initialKey) }
     var model by remember { mutableStateOf(initialModel) }
@@ -144,6 +145,7 @@ fun SettingsDialog(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var transcriptLogging by remember { mutableStateOf(Secrets.transcriptLoggingEnabled(ctx)) }
+    var fullKeyboard by remember { mutableStateOf(KeyboardPrefs.fullImeFeatures(ctx)) }
     var lastCrash by remember { mutableStateOf(CrashHandler.lastCrash(ctx)) }
     var updateState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
     var storageGranted by remember { mutableStateOf(StorageAccess.isGranted(ctx)) }
@@ -250,6 +252,28 @@ fun SettingsDialog(
                 "Get a key at console.anthropic.com/settings/keys. Leave the endpoint as-is unless you're pointing at a GHT Halo proxy.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
             )
+
+            SettingsDivider()
+
+            Text("Keyboard", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Switch(
+                    checked = fullKeyboard,
+                    onCheckedChange = {
+                        fullKeyboard = it
+                        KeyboardPrefs.setFullImeFeatures(ctx, it)
+                        onKeyboardModeChanged()
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = RailAccent, checkedThumbColor = RailPromptText),
+                )
+                Text(
+                    "Full keyboard features. Keeps your keyboard's own top row, so voice typing, " +
+                        "the clipboard, emoji and its settings stay reachable at the prompt. Autocorrect " +
+                        "and predictions stay off either way. Turn this off only if your keyboard starts " +
+                        "inserting or swallowing characters in the terminal.",
+                    color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
+                )
+            }
 
             SettingsDivider()
 
