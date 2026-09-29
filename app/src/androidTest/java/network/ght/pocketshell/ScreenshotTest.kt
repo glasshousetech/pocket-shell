@@ -49,14 +49,20 @@ class ScreenshotTest {
         }
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            device.wait(Until.findObject(By.clazz("network.ght.pocketshell.term.TerminalView")), 10_000)
+            // First run gates the whole UI behind a distro install that cannot be
+            // dismissed, so take Alpine — a ~3 MB rootfs — to get past it.
+            if (device.wait(Until.findObject(By.text("Set up Pocket Shell")), 15_000) != null) {
+                capture("first_run_setup")
+                device.findObject(By.text("Alpine Linux"))?.click()
+                device.wait(Until.findObject(By.clazz(TERMINAL)), 240_000)
+            }
+            device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000)
             Thread.sleep(1_500) // let the shell prompt actually render
             capture("launch_shell")
 
             // Focus the terminal (window focus alone doesn't route text input;
-            // it needs an explicit tap, same as verified manually this session),
-            // then run a real command and capture its output.
-            device.findObject(By.clazz("network.ght.pocketshell.term.TerminalView"))?.click()
+            // it needs an explicit tap), then run a real command and capture it.
+            device.findObject(By.clazz(TERMINAL))?.click()
             Thread.sleep(300)
             device.executeShellCommand("input text echo%sPOCKETSHELL_SCREENSHOT_DEMO")
             device.pressEnter()
@@ -68,11 +74,11 @@ class ScreenshotTest {
             capture("settings")
 
             // The Keyboard section sits below the AI block in the scrolling dialog.
-            repeat(5) {
+            repeat(6) {
                 if (device.findObject(By.text("Keyboard")) == null) {
                     device.swipe(
-                        device.displayWidth / 2, (device.displayHeight * 0.70).toInt(),
-                        device.displayWidth / 2, (device.displayHeight * 0.40).toInt(), 12,
+                        device.displayWidth / 2, (device.displayHeight * 0.72).toInt(),
+                        device.displayWidth / 2, (device.displayHeight * 0.38).toInt(), 12,
                     )
                     Thread.sleep(400)
                 }
@@ -81,21 +87,21 @@ class ScreenshotTest {
             device.pressBack()
             Thread.sleep(300)
 
-            device.findObject(By.text("✨"))?.click()
+            device.findObject(By.text("AI"))?.click()
             Thread.sleep(500)
             capture("copilot_panel")
-            device.findObject(By.text("✨"))?.click() // close it again
+            device.findObject(By.text("AI"))?.click() // close it again
             Thread.sleep(300)
 
-            device.findObject(By.text("🎨"))?.click()
+            device.findObject(By.text("Theme"))?.click()
             Thread.sleep(500)
             capture("theme_picker")
             device.pressBack()
             Thread.sleep(300)
 
-            device.findObject(By.text("🐧"))?.click()
-            Thread.sleep(500)
-            capture("linux_distro_picker")
+            device.findObject(By.text("Connect"))?.click()
+            Thread.sleep(700)
+            capture("connections")
             device.pressBack()
         }
 
@@ -104,5 +110,6 @@ class ScreenshotTest {
 
     private companion object {
         const val TAG = "PocketShellScreenshotTest"
+        const val TERMINAL = "network.ght.pocketshell.term.TerminalView"
     }
 }
