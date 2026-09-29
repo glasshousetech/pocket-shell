@@ -66,6 +66,18 @@ class ScreenshotTest {
             device.findObject(By.text("⚙"))?.click()
             device.wait(Until.findObject(By.text("AI Copilot")), 5_000)
             capture("settings")
+
+            // The Keyboard section sits below the AI block in the scrolling dialog.
+            repeat(5) {
+                if (device.findObject(By.text("Keyboard")) == null) {
+                    device.swipe(
+                        device.displayWidth / 2, (device.displayHeight * 0.70).toInt(),
+                        device.displayWidth / 2, (device.displayHeight * 0.40).toInt(), 12,
+                    )
+                    Thread.sleep(400)
+                }
+            }
+            capture("settings_keyboard")
             device.pressBack()
             Thread.sleep(300)
 
