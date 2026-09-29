@@ -156,7 +156,7 @@ private fun KeyEditRow(
 private fun EditButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     Text(
         label,
-        color = if (enabled) RailAccentDim else Color(0xFF3A4368),
+        color = if (enabled) RailAccentDim else RailBorder,
         fontFamily = RailMono,
         fontWeight = FontWeight.Medium,
         fontSize = 13.sp,

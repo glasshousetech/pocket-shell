@@ -82,7 +82,7 @@ fun CopilotPanel(
         }
 
         error?.let {
-            Text(it, color = Color(0xFFE0714F), fontFamily = RailMono, fontSize = 12.sp)
+            Text(it, color = RailError, fontFamily = RailMono, fontSize = 12.sp)
         }
 
         if (result != null) {
@@ -129,6 +129,7 @@ private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modi
 /** BYO-key settings: paste an Anthropic API key and pick a model. */
 @Composable
 fun SettingsDialog(
+    onThemes: () -> Unit,
     initialKey: String,
     initialModel: String,
     initialBase: String,
@@ -173,6 +174,11 @@ fun SettingsDialog(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Pocket Shell Settings", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+
+            Text("Appearance", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text("${LocalPocketTheme.current.label} · app and terminal", color = RailDimText, fontSize = 12.sp)
+            TextButton(onClick = onThemes) { Text("Browse 20 themes") }
+            SettingsDivider()
 
             Text("Phone storage", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text(
@@ -298,7 +304,7 @@ fun SettingsDialog(
                 is UpdateCheckState.Idle -> AiChip("Check for updates", { checkForUpdates() }, Modifier.fillMaxWidth())
                 is UpdateCheckState.Checking -> Text("Checking…", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
                 is UpdateCheckState.UpToDate -> Text("You're up to date.", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
-                is UpdateCheckState.Error -> Text("Couldn't check for updates — try again later.", color = Color(0xFFE0714F), fontFamily = RailMono, fontSize = 11.sp)
+                is UpdateCheckState.Error -> Text("Couldn't check for updates — try again later.", color = RailError, fontFamily = RailMono, fontSize = 11.sp)
                 is UpdateCheckState.Available -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("v${s.latestVersion} is available.", color = RailAccent, fontFamily = RailMono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     AiChip("Download v${s.latestVersion}", {

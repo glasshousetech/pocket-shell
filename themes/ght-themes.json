@@ -1,0 +1,934 @@
+{
+  "schemaVersion": 1,
+  "themes": [
+    {
+      "id": "ght_signature",
+      "label": "GHT Signature",
+      "description": "Warm gold. Quiet charcoal.",
+      "mode": "dark",
+      "tags": [
+        "warm"
+      ],
+      "ui": {
+        "surface": "#1B1B18",
+        "surfaceAlt": "#151513",
+        "control": "#282824",
+        "text": "#F1EEE6",
+        "muted": "#94928D",
+        "accent": "#D4A437",
+        "onAccent": "#111111",
+        "border": "#4A4945",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#10100F",
+        "foreground": "#F1EEE6",
+        "cursor": "#D4A437",
+        "ansi": [
+          "#10100F",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#F1EEE6",
+          "#94928D",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#F1EEE6"
+        ]
+      }
+    },
+    {
+      "id": "obsidian",
+      "label": "Obsidian",
+      "description": "Pure black. Electric ice.",
+      "mode": "dark",
+      "tags": [
+        "oled",
+        "cool"
+      ],
+      "ui": {
+        "surface": "#0C1113",
+        "surfaceAlt": "#050809",
+        "control": "#191F21",
+        "text": "#E3F4F5",
+        "muted": "#848E8E",
+        "accent": "#71E5EA",
+        "onAccent": "#111111",
+        "border": "#3B4345",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#000000",
+        "foreground": "#E3F4F5",
+        "cursor": "#71E5EA",
+        "ansi": [
+          "#000000",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#E3F4F5",
+          "#848E8E",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#E3F4F5"
+        ]
+      }
+    },
+    {
+      "id": "graphite",
+      "label": "Graphite",
+      "description": "Neutral, precise, understated.",
+      "mode": "dark",
+      "tags": [
+        "neutral"
+      ],
+      "ui": {
+        "surface": "#25282D",
+        "surfaceAlt": "#1E2125",
+        "control": "#313438",
+        "text": "#E7E9EC",
+        "muted": "#9D9FA2",
+        "accent": "#BAC5D4",
+        "onAccent": "#111111",
+        "border": "#505257",
+        "error": "#F27B7B",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#191B1E",
+        "foreground": "#E7E9EC",
+        "cursor": "#BAC5D4",
+        "ansi": [
+          "#191B1E",
+          "#F27B7B",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#E7E9EC",
+          "#9D9FA2",
+          "#F49393",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#E7E9EC"
+        ]
+      }
+    },
+    {
+      "id": "blueprint",
+      "label": "Blueprint",
+      "description": "Midnight blue. Clear intent.",
+      "mode": "dark",
+      "tags": [
+        "cool"
+      ],
+      "ui": {
+        "surface": "#0F2440",
+        "surfaceAlt": "#0B1D36",
+        "control": "#1B304B",
+        "text": "#DDEAFF",
+        "muted": "#8E9BAF",
+        "accent": "#77B7FF",
+        "onAccent": "#111111",
+        "border": "#3C506A",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#07172D",
+        "foreground": "#DDEAFF",
+        "cursor": "#77B7FF",
+        "ansi": [
+          "#07172D",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#DDEAFF",
+          "#8E9BAF",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#DDEAFF"
+        ]
+      }
+    },
+    {
+      "id": "deepwater",
+      "label": "Deepwater",
+      "description": "Ocean ink and bright teal.",
+      "mode": "dark",
+      "tags": [
+        "cool"
+      ],
+      "ui": {
+        "surface": "#0D2B31",
+        "surfaceAlt": "#092228",
+        "control": "#19373D",
+        "text": "#DDF3F1",
+        "muted": "#8FA2A3",
+        "accent": "#58DCCB",
+        "onAccent": "#111111",
+        "border": "#3B575B",
+        "error": "#F17A7A",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#061B20",
+        "foreground": "#DDF3F1",
+        "cursor": "#58DCCB",
+        "ansi": [
+          "#061B20",
+          "#F17A7A",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#DDF3F1",
+          "#8FA2A3",
+          "#F49292",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#DDF3F1"
+        ]
+      }
+    },
+    {
+      "id": "forest",
+      "label": "Forest",
+      "description": "Pine shade. Moss accents.",
+      "mode": "dark",
+      "tags": [
+        "nature"
+      ],
+      "ui": {
+        "surface": "#1B2D1F",
+        "surfaceAlt": "#152318",
+        "control": "#27382A",
+        "text": "#E2ECDB",
+        "muted": "#99A297",
+        "accent": "#A6D47C",
+        "onAccent": "#111111",
+        "border": "#475748",
+        "error": "#F27D7D",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#101B13",
+        "foreground": "#E2ECDB",
+        "cursor": "#A6D47C",
+        "ansi": [
+          "#101B13",
+          "#F27D7D",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#E2ECDB",
+          "#99A297",
+          "#F49494",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#E2ECDB"
+        ]
+      }
+    },
+    {
+      "id": "ember",
+      "label": "Ember",
+      "description": "Burnished copper after dark.",
+      "mode": "dark",
+      "tags": [
+        "warm"
+      ],
+      "ui": {
+        "surface": "#332019",
+        "surfaceAlt": "#291812",
+        "control": "#3F2C24",
+        "text": "#F5E2D4",
+        "muted": "#A8988F",
+        "accent": "#F5A06D",
+        "onAccent": "#111111",
+        "border": "#5E4B42",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#21110D",
+        "foreground": "#F5E2D4",
+        "cursor": "#F5A06D",
+        "ansi": [
+          "#21110D",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#F5E2D4",
+          "#A8988F",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#F5E2D4"
+        ]
+      }
+    },
+    {
+      "id": "nightshade",
+      "label": "Nightshade",
+      "description": "Plum shadows. Soft lavender.",
+      "mode": "dark",
+      "tags": [
+        "purple"
+      ],
+      "ui": {
+        "surface": "#2C1D36",
+        "surfaceAlt": "#22162A",
+        "control": "#382942",
+        "text": "#F1E3FA",
+        "muted": "#A096A9",
+        "accent": "#CFACFF",
+        "onAccent": "#111111",
+        "border": "#574961",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#191021",
+        "foreground": "#F1E3FA",
+        "cursor": "#CFACFF",
+        "ansi": [
+          "#191021",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#F1E3FA",
+          "#A096A9",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#F1E3FA"
+        ]
+      }
+    },
+    {
+      "id": "phosphor",
+      "label": "Phosphor",
+      "description": "Green-screen clarity on black.",
+      "mode": "dark",
+      "tags": [
+        "oled",
+        "retro",
+        "green"
+      ],
+      "ui": {
+        "surface": "#091409",
+        "surfaceAlt": "#040904",
+        "control": "#142114",
+        "text": "#BCECC0",
+        "muted": "#748F76",
+        "accent": "#72E58A",
+        "onAccent": "#111111",
+        "border": "#304431",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#000000",
+        "foreground": "#BCECC0",
+        "cursor": "#72E58A",
+        "ansi": [
+          "#000000",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#BCECC0",
+          "#748F76",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#BCECC0"
+        ]
+      }
+    },
+    {
+      "id": "amber",
+      "label": "Amber",
+      "description": "Warm amber. After hours.",
+      "mode": "dark",
+      "tags": [
+        "retro",
+        "warm"
+      ],
+      "ui": {
+        "surface": "#291D0D",
+        "surfaceAlt": "#1F1509",
+        "control": "#352918",
+        "text": "#F8E5BF",
+        "muted": "#A1947C",
+        "accent": "#F2BB55",
+        "onAccent": "#111111",
+        "border": "#574934",
+        "error": "#F17676",
+        "success": "#87CD91",
+        "warning": "#E6BC76",
+        "info": "#8CB7E8"
+      },
+      "terminal": {
+        "background": "#160E05",
+        "foreground": "#F8E5BF",
+        "cursor": "#F2BB55",
+        "ansi": [
+          "#160E05",
+          "#F17676",
+          "#87CD91",
+          "#E6BC76",
+          "#8CB7E8",
+          "#CEA0D8",
+          "#80C8CA",
+          "#F8E5BF",
+          "#A1947C",
+          "#F48F8F",
+          "#9DD6A5",
+          "#EBC88F",
+          "#A1C4EC",
+          "#D7B1DF",
+          "#97D2D4",
+          "#F8E5BF"
+        ]
+      }
+    },
+    {
+      "id": "porcelain",
+      "label": "Porcelain",
+      "description": "White space. Cobalt detail.",
+      "mode": "light",
+      "tags": [
+        "light",
+        "neutral"
+      ],
+      "ui": {
+        "surface": "#FFFFFF",
+        "surfaceAlt": "#FCFDFD",
+        "control": "#F2F2F3",
+        "text": "#202833",
+        "muted": "#686C71",
+        "accent": "#245AB8",
+        "onAccent": "#FFFFFF",
+        "border": "#CED0D2",
+        "error": "#A22F3C",
+        "success": "#246333",
+        "warning": "#805314",
+        "info": "#285AA3"
+      },
+      "terminal": {
+        "background": "#FAFBFC",
+        "foreground": "#202833",
+        "cursor": "#245AB8",
+        "ansi": [
+          "#FAFBFC",
+          "#A22F3C",
+          "#246333",
+          "#805314",
+          "#285AA3",
+          "#853B88",
+          "#146869",
+          "#202833",
+          "#686C71",
+          "#852731",
+          "#1E512A",
+          "#694410",
+          "#214A86",
+          "#6D3070",
+          "#105556",
+          "#202833"
+        ]
+      }
+    },
+    {
+      "id": "linen",
+      "label": "Linen",
+      "description": "Warm paper. Walnut ink.",
+      "mode": "light",
+      "tags": [
+        "light",
+        "warm"
+      ],
+      "ui": {
+        "surface": "#FFFAF2",
+        "surfaceAlt": "#FBF5EB",
+        "control": "#F3EEE5",
+        "text": "#342A20",
+        "muted": "#6F695F",
+        "accent": "#865023",
+        "onAccent": "#FFFFFF",
+        "border": "#D2CCC4",
+        "error": "#A22F3C",
+        "success": "#246333",
+        "warning": "#805314",
+        "info": "#285AA3"
+      },
+      "terminal": {
+        "background": "#F8F1E6",
+        "foreground": "#342A20",
+        "cursor": "#865023",
+        "ansi": [
+          "#F8F1E6",
+          "#A22F3C",
+          "#246333",
+          "#805314",
+          "#285AA3",
+          "#853B88",
+          "#146869",
+          "#342A20",
+          "#6F695F",
+          "#852731",
+          "#1E512A",
+          "#694410",
+          "#214A86",
+          "#6D3070",
+          "#105556",
+          "#342A20"
+        ]
+      }
+    },
+    {
+      "id": "arctic",
+      "label": "Arctic",
+      "description": "Frost blue. Deep navy.",
+      "mode": "light",
+      "tags": [
+        "light",
+        "cool"
+      ],
+      "ui": {
+        "surface": "#F8FCFF",
+        "surfaceAlt": "#F1F8FC",
+        "control": "#EBF0F4",
+        "text": "#182D42",
+        "muted": "#5E6B77",
+        "accent": "#165F9E",
+        "onAccent": "#FFFFFF",
+        "border": "#C7CED5",
+        "error": "#A22F3C",
+        "success": "#246333",
+        "warning": "#805314",
+        "info": "#285AA3"
+      },
+      "terminal": {
+        "background": "#ECF4FA",
+        "foreground": "#182D42",
+        "cursor": "#165F9E",
+        "ansi": [
+          "#ECF4FA",
+          "#A22F3C",
+          "#246333",
+          "#805314",
+          "#285AA3",
+          "#853B88",
+          "#146869",
+          "#182D42",
+          "#5E6B77",
+          "#852731",
+          "#1E512A",
+          "#694410",
+          "#214A86",
+          "#6D3070",
+          "#105556",
+          "#182D42"
+        ]
+      }
+    },
+    {
+      "id": "rose",
+      "label": "Rose Quartz",
+      "description": "Soft blush. Mulberry ink.",
+      "mode": "light",
+      "tags": [
+        "light",
+        "rose"
+      ],
+      "ui": {
+        "surface": "#FFFAFB",
+        "surfaceAlt": "#FCF4F6",
+        "control": "#F3EDEF",
+        "text": "#3A252E",
+        "muted": "#73656A",
+        "accent": "#983F60",
+        "onAccent": "#FFFFFF",
+        "border": "#D4CBCE",
+        "error": "#A22F3C",
+        "success": "#246333",
+        "warning": "#805314",
+        "info": "#285AA3"
+      },
+      "terminal": {
+        "background": "#FAF0F2",
+        "foreground": "#3A252E",
+        "cursor": "#983F60",
+        "ansi": [
+          "#FAF0F2",
+          "#A22F3C",
+          "#246333",
+          "#805314",
+          "#285AA3",
+          "#853B88",
+          "#146869",
+          "#3A252E",
+          "#73656A",
+          "#852731",
+          "#1E512A",
+          "#694410",
+          "#214A86",
+          "#6D3070",
+          "#105556",
+          "#3A252E"
+        ]
+      }
+    },
+    {
+      "id": "sage",
+      "label": "Sage",
+      "description": "Pale botanical. Evergreen.",
+      "mode": "light",
+      "tags": [
+        "light",
+        "nature"
+      ],
+      "ui": {
+        "surface": "#FAFCF6",
+        "surfaceAlt": "#F4F8EF",
+        "control": "#EDF0E9",
+        "text": "#283322",
+        "muted": "#646B60",
+        "accent": "#426B35",
+        "onAccent": "#FFFFFF",
+        "border": "#CCD0C7",
+        "error": "#A22F3C",
+        "success": "#246333",
+        "warning": "#805314",
+        "info": "#285AA3"
+      },
+      "terminal": {
+        "background": "#EFF4E9",
+        "foreground": "#283322",
+        "cursor": "#426B35",
+        "ansi": [
+          "#EFF4E9",
+          "#A22F3C",
+          "#246333",
+          "#805314",
+          "#285AA3",
+          "#853B88",
+          "#146869",
+          "#283322",
+          "#646B60",
+          "#852731",
+          "#1E512A",
+          "#694410",
+          "#214A86",
+          "#6D3070",
+          "#105556",
+          "#283322"
+        ]
+      }
+    },
+    {
+      "id": "default",
+      "label": "Pocket Shell",
+      "description": "Original indigo and xterm.",
+      "mode": "dark",
+      "tags": [
+        "classic"
+      ],
+      "ui": {
+        "surface": "#161B2C",
+        "surfaceAlt": "#0D101A",
+        "control": "#202539",
+        "text": "#B9C6FF",
+        "muted": "#878FB0",
+        "accent": "#8CABFF",
+        "onAccent": "#111111",
+        "border": "#3F4661",
+        "error": "#FF8585",
+        "success": "#00CD00",
+        "warning": "#CDCD00",
+        "info": "#6495ED"
+      },
+      "terminal": {
+        "background": "#000000",
+        "foreground": "#FFFFFF",
+        "cursor": "#FFFFFF",
+        "ansi": [
+          "#000000",
+          "#CD0000",
+          "#00CD00",
+          "#CDCD00",
+          "#6495ED",
+          "#CD00CD",
+          "#00CDCD",
+          "#E5E5E5",
+          "#7F7F7F",
+          "#FF0000",
+          "#00FF00",
+          "#FFFF00",
+          "#5C5CFF",
+          "#FF00FF",
+          "#00FFFF",
+          "#FFFFFF"
+        ]
+      }
+    },
+    {
+      "id": "dracula",
+      "label": "Dracula",
+      "description": "Velvet charcoal. Vivid pastels.",
+      "mode": "dark",
+      "tags": [
+        "classic"
+      ],
+      "ui": {
+        "surface": "#303241",
+        "surfaceAlt": "#2D2F3D",
+        "control": "#3C3E4C",
+        "text": "#F8F8F2",
+        "muted": "#AFB0B0",
+        "accent": "#C29BF9",
+        "onAccent": "#111111",
+        "border": "#62646D",
+        "error": "#FF8C8C",
+        "success": "#50FA7B",
+        "warning": "#F1FA8C",
+        "info": "#C29BF9"
+      },
+      "terminal": {
+        "background": "#282A36",
+        "foreground": "#F8F8F2",
+        "cursor": "#F8F8F0",
+        "ansi": [
+          "#21222C",
+          "#FF5555",
+          "#50FA7B",
+          "#F1FA8C",
+          "#BD93F9",
+          "#FF79C6",
+          "#8BE9FD",
+          "#F8F8F2",
+          "#6272A4",
+          "#FF6E6E",
+          "#69FF94",
+          "#FFFFA5",
+          "#D6ACFF",
+          "#FF92DF",
+          "#A4FFFF",
+          "#FFFFFF"
+        ]
+      }
+    },
+    {
+      "id": "solarized_dark",
+      "label": "Solarized Dark",
+      "description": "Balanced ocean tones.",
+      "mode": "dark",
+      "tags": [
+        "classic"
+      ],
+      "ui": {
+        "surface": "#073642",
+        "surfaceAlt": "#04323D",
+        "control": "#113F4A",
+        "text": "#B5C6C7",
+        "muted": "#96AAAD",
+        "accent": "#63B6E7",
+        "onAccent": "#111111",
+        "border": "#335A63",
+        "error": "#FF8585",
+        "success": "#A0AF38",
+        "warning": "#C5A338",
+        "info": "#67AEE0"
+      },
+      "terminal": {
+        "background": "#002B36",
+        "foreground": "#839496",
+        "cursor": "#839496",
+        "ansi": [
+          "#073642",
+          "#DC322F",
+          "#859900",
+          "#B58900",
+          "#268BD2",
+          "#D33682",
+          "#2AA198",
+          "#EEE8D5",
+          "#002B36",
+          "#CB4B16",
+          "#586E75",
+          "#657B83",
+          "#839496",
+          "#6C71C4",
+          "#93A1A1",
+          "#FDF6E3"
+        ]
+      }
+    },
+    {
+      "id": "nord",
+      "label": "Nord",
+      "description": "Arctic dusk. Frosted blue.",
+      "mode": "dark",
+      "tags": [
+        "classic"
+      ],
+      "ui": {
+        "surface": "#343D4C",
+        "surfaceAlt": "#323947",
+        "control": "#3F4756",
+        "text": "#E5E9F0",
+        "muted": "#B5B9C0",
+        "accent": "#89C1D0",
+        "onAccent": "#111111",
+        "border": "#606875",
+        "error": "#FF9D9D",
+        "success": "#A7C191",
+        "warning": "#EBCB8B",
+        "info": "#A4BBD2"
+      },
+      "terminal": {
+        "background": "#2E3440",
+        "foreground": "#D8DEE9",
+        "cursor": "#D8DEE9",
+        "ansi": [
+          "#3B4252",
+          "#BF616A",
+          "#A3BE8C",
+          "#EBCB8B",
+          "#81A1C1",
+          "#B48EAD",
+          "#88C0D0",
+          "#E5E9F0",
+          "#4C566A",
+          "#BF616A",
+          "#A3BE8C",
+          "#EBCB8B",
+          "#81A1C1",
+          "#B48EAD",
+          "#8FBCBB",
+          "#ECEFF4"
+        ]
+      }
+    },
+    {
+      "id": "gruvbox_dark",
+      "label": "Gruvbox Dark",
+      "description": "Earthy charcoal. Warm contrast.",
+      "mode": "dark",
+      "tags": [
+        "classic"
+      ],
+      "ui": {
+        "surface": "#32302F",
+        "surfaceAlt": "#2E2D2C",
+        "control": "#3D3A37",
+        "text": "#EBDBB2",
+        "muted": "#B1A790",
+        "accent": "#FABD2F",
+        "onAccent": "#111111",
+        "border": "#605B50",
+        "error": "#FF8585",
+        "success": "#ADAC48",
+        "warning": "#D99D2A",
+        "info": "#86B0B2"
+      },
+      "terminal": {
+        "background": "#282828",
+        "foreground": "#EBDBB2",
+        "cursor": "#EBDBB2",
+        "ansi": [
+          "#282828",
+          "#CC241D",
+          "#98971A",
+          "#D79921",
+          "#458588",
+          "#B16286",
+          "#689D6A",
+          "#A89984",
+          "#928374",
+          "#FB4934",
+          "#B8BB26",
+          "#FABD2F",
+          "#83A598",
+          "#D3869B",
+          "#8EC07C",
+          "#EBDBB2"
+        ]
+      }
+    }
+  ]
+}
