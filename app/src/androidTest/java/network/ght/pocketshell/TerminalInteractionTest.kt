@@ -2,12 +2,13 @@ package network.ght.pocketshell
 
 import android.content.Context
 import android.content.Intent
+import android.text.InputType
 import androidx.test.core.app.ActivityScenario
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import com.termux.terminal.TerminalSession
-import com.termux.view.TerminalView
+import network.ght.pocketshell.term.TerminalView
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -164,5 +165,40 @@ class TerminalInteractionTest {
         instrumentation.waitForIdleSync()
         instrumentation.runOnMainSync { input.commitText("!", 1) }
         waitFor(session, "68 65 6c 6c 6f 7f 21")
+    }
+
+    @Test fun fullKeyboardModeAsksTheImeForAnOrdinaryTextField() = terminal(receiver(1)) { view, _, _ ->
+        // Regression guard for the keyboard's missing top row. Upstream Termux declares the
+        // terminal as a password-style field, and every mainstream keyboard answers by hiding
+        // the toolbar row that carries voice typing, the clipboard and emoji — Android also
+        // refuses voice input on password fields outright.
+        try {
+            KeyboardPrefs.setFullImeFeatures(context, true)
+            val full = EditorInfo()
+            instrumentation.runOnMainSync { view.onCreateInputConnection(full) }
+
+            assertEquals("The terminal must present as a real text field",
+                InputType.TYPE_CLASS_TEXT, full.inputType and InputType.TYPE_MASK_CLASS)
+            assertEquals("Any password variation hides the keyboard's toolbar row",
+                0, full.inputType and InputType.TYPE_MASK_VARIATION)
+            assertTrue("Predictions and autocorrect must stay off at a prompt",
+                full.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
+            assertTrue("Enter must stay a newline key rather than a Done action key",
+                full.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
+            assertEquals("Commands must never be auto-capitalised", 0,
+                full.inputType and (InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                    InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS))
+            assertTrue("A keyboard must not learn what is typed at a prompt",
+                full.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
+
+            KeyboardPrefs.setFullImeFeatures(context, false)
+            val charBased = EditorInfo()
+            instrumentation.runOnMainSync { view.onCreateInputConnection(charBased) }
+            assertEquals("Switching the setting off restores upstream char-based input",
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                charBased.inputType)
+        } finally {
+            KeyboardPrefs.setFullImeFeatures(context, true)
+        }
     }
 }
