@@ -56,7 +56,15 @@ class ScreenshotTest {
                 device.findObject(By.text("Alpine Linux"))?.click()
                 device.wait(Until.findObject(By.clazz(TERMINAL)), 240_000)
             }
-            device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000)
+            if (device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000) == null) {
+                // proot cannot fork under the emulator kernel ("/bin/sh: can't fork:
+                // Function not implemented"), and first run will not release the UI
+                // without a working Linux install. Capture the failure and stop rather
+                // than filling the artifact with identical pictures of the gate.
+                capture("setup_failed")
+                Log.w(TAG, "no terminal after setup — see the setup_failed capture")
+                return@use
+            }
             Thread.sleep(1_500) // let the shell prompt actually render
             capture("launch_shell")
 
