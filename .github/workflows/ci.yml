@@ -37,6 +37,9 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
+      - name: Validate shared theme catalog
+        run: python3 scripts/generate-themes.py --check
+
       - name: Build debug APK
         run: |
           chmod +x ./gradlew
@@ -93,10 +96,25 @@ jobs:
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: >
-            ./gradlew :app:connectedDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest
-            --no-daemon --stacktrace
+          script: |
+            ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -e class network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            mkdir -p app/build/outputs/theme-screenshots
+            adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
+            tar xf app/build/outputs/theme-screenshots.tar -C app/build/outputs/theme-screenshots
+            grep -q "OK (10 tests)" instrument-output.txt
+
+      - name: Upload theme and terminal UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-theme-evidence
+          path: |
+            app/build/outputs/theme-screenshots
+            instrument-output.txt
+          if-no-files-found: warn
 
   screenshots:
     # Manual-only: walks the app through a few real screens on a booted

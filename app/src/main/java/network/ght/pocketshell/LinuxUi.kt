@@ -76,7 +76,7 @@ private fun DistroRow(distro: Distro, available: Boolean, recommended: Boolean, 
         if (!available) {
             Text(
                 "Not available for this device's CPU.",
-                color = Color(0xFFE0714F), fontFamily = RailMono, fontSize = 10.sp,
+                color = RailError, fontFamily = RailMono, fontSize = 10.sp,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
@@ -132,7 +132,7 @@ fun LinuxManageDialog(
                 TextButton(onClick = onDismiss) { Text("Close", color = RailAccentDim, fontFamily = RailMono) }
                 if (distro != null) {
                     TextButton(onClick = onUninstall) {
-                        Text("Uninstall", color = Color(0xFFE0714F), fontFamily = RailMono, fontWeight = FontWeight.Bold)
+                        Text("Uninstall", color = RailError, fontFamily = RailMono, fontWeight = FontWeight.Bold)
                     }
                 }
             }

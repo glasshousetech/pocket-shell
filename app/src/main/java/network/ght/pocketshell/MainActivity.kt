@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.view.KeyEvent
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.res.ResourcesCompat
 import network.ght.pocketshell.ui.*
-import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import kotlinx.coroutines.Dispatchers
@@ -84,19 +83,15 @@ class MainActivity : ComponentActivity() {
         ContextCompat.startForegroundService(this, intent)
         bindService(intent, connection, Context.BIND_AUTO_CREATE)
 
-        // Real frosted-glass behind the window (Kali-style translucent chrome),
-        // not just a tinted overlay. Older devices still get the plain see-through
-        // wallpaper from the theme, just without the blur.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-            window.attributes = window.attributes.apply { blurBehindRadius = 80 }
-        }
-
         setContent {
-            PocketShellTheme {
-                Surface(color = Color.Transparent) {
+            var currentTheme by remember { mutableStateOf(TermThemes.saved(this)) }
+            PocketShellTheme(currentTheme) {
+                Surface(color = RailBg) {
                     val service = serviceState.value
-                    if (service == null) Splash() else PocketShellApp(service, sshKeyImportMessage.value, ::pickSshPrivateKey)
+                    if (service == null) Splash() else PocketShellApp(
+                        service, sshKeyImportMessage.value, ::pickSshPrivateKey,
+                        onThemeChanged = { currentTheme = it },
+                    )
                 }
             }
         }
@@ -122,7 +117,7 @@ private fun Splash() {
 }
 
 @Composable
-private fun PocketShellApp(service: TermService, keyImportMessage: String?, onImportKey: () -> Unit) {
+private fun PocketShellApp(service: TermService, keyImportMessage: String?, onImportKey: () -> Unit, onThemeChanged: (TermTheme) -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
     val fontPx = remember { with(density) { 13.sp.toPx() }.toInt().coerceAtLeast(18) }
@@ -130,12 +125,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         runCatching { ResourcesCompat.getFont(ctx, R.font.jbm_regular) }.getOrNull() ?: Typeface.MONOSPACE
     }
 
-    // Load the persisted terminal color theme before any session/emulator is
-    // created, so the very first session already renders with it.
-    var currentThemeId by remember { mutableStateOf(TermThemes.saved(ctx).id) }
-    SideEffect {
-        TerminalColors.COLOR_SCHEME.updateWith(TermThemes.byId(currentThemeId).toProperties())
-    }
+    val currentTheme = LocalPocketTheme.current
+    val terminalBackground = themeColor(currentTheme.background).toArgb()
 
     // Sessions live in the foreground service (survive backgrounding).
     val sessions = service.sessions
@@ -270,9 +261,9 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     fun setTheme(theme: TermTheme) {
-        TermThemes.apply(theme, sessions.map { it.session }) { termViewRef.value?.onScreenUpdated() }
+        TermThemes.apply(theme, sessions.map { it.session }) { termViewRef.value?.let(TerminalInteraction::redraw) }
         TermThemes.save(ctx, theme)
-        currentThemeId = theme.id
+        onThemeChanged(theme)
         themeOpen = false
     }
 
@@ -444,6 +435,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     }
                 },
                 update = { v ->
+                    v.setBackgroundColor(terminalBackground)
                     if (v.currentSession !== active.session) {
                         v.attachSession(active.session)
                         v.onScreenUpdated()
@@ -551,6 +543,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     if (settingsOpen) {
         SettingsDialog(
+            onThemes = { settingsOpen = false; themeOpen = true },
             initialKey = Secrets.apiKey(ctx),
             initialModel = Secrets.model(ctx),
             initialBase = Secrets.baseUrl(ctx),
@@ -626,7 +619,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     if (themeOpen) {
         ThemePickerDialog(
-            currentId = currentThemeId,
+            currentId = currentTheme.id,
             onPick = { setTheme(it) },
             onDismiss = { themeOpen = false },
         )
@@ -947,13 +940,13 @@ private fun KeyChip(label: String, modifier: Modifier = Modifier, active: Boolea
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(if (active) RailAccent.copy(alpha = 0.45f) else RailKeyChip)
+            .background(if (active) RailAccent else RailKeyChip)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 11.sp)
+        Text(label, color = if (active) RailOnAccent else RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 11.sp)
     }
 }
 
@@ -973,7 +966,7 @@ private fun ExtraKeysHandle(open: Boolean, onToggle: () -> Unit, onLongClick: ()
                 .width(34.dp)
                 .height(4.dp)
                 .clip(RoundedCornerShape(3.dp))
-                .background(if (open) RailAccentDim else Color(0xFF3A4368)),
+                .background(if (open) RailAccentDim else RailBorder),
         )
     }
 }

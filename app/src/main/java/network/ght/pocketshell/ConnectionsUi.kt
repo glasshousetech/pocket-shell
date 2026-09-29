@@ -137,7 +137,7 @@ fun ConnectionsDialog(
             }
             ProfileField("tmux session (blank to disable)", tmux) { tmux = it }
 
-            error?.let { Text(it, color = Color(0xFFE0714F), fontFamily = RailMono, fontSize = 11.sp) }
+            error?.let { Text(it, color = RailError, fontFamily = RailMono, fontSize = 11.sp) }
             Text(
                 "Keys stay private inside Pocket Shell's Linux environment and are never copied to shared phone storage.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
@@ -169,7 +169,7 @@ fun ConnectionsDialog(
                 contentAlignment = Alignment.Center,
             ) { Text("Import SSH private key", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
             keyImportMessage?.let {
-                Text(it, color = if (it.startsWith("Key imported")) RailAccent else Color(0xFFE0714F), fontFamily = RailMono, fontSize = 10.sp)
+                Text(it, color = if (it.startsWith("Key imported")) RailAccent else RailError, fontFamily = RailMono, fontSize = 10.sp)
             }
             Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
