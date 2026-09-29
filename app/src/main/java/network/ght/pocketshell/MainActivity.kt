@@ -416,7 +416,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onSettings = { settingsOpen = true },
         )
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg)) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg).padding(horizontal = 4.dp)) {
             AndroidView(
                 modifier = Modifier.matchParentSize(),
                 factory = { c ->
@@ -671,6 +671,7 @@ private fun TabRail(
                 val active = i == activeIndex
                 Column(
                     modifier = Modifier
+                        .width(IntrinsicSize.Max)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (active) RailBg else RailSurface)
                         .clickable { onSelect(i) },
