@@ -420,7 +420,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             AndroidView(
                 modifier = Modifier.matchParentSize(),
                 factory = { c ->
-                    HistoryPreservingTerminalView(c).apply {
+                    TerminalViewport(c).apply { terminal.apply {
                         setTerminalViewClient(viewClient)
                         viewClient.view = this
                         keepScreenOn = true
@@ -432,9 +432,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                         onScreenUpdated()
                         termViewRef.value = this
                         post { viewClient.showKeyboard() }
-                    }
+                    } }
                 },
-                update = { v ->
+                update = { container ->
+                    val v = container.terminal
                     v.setBackgroundColor(terminalBackground)
                     if (v.currentSession !== active.session) {
                         v.attachSession(active.session)
