@@ -10,6 +10,10 @@ app and terminal themes. The goal is a terminal that feels like a native app, no
 ## Why Pocket Shell over the alternatives
 
 - **Tab Rail** — multiple live shells in one window, switch instantly. No swipe-drawer.
+- **Tab menu** — long-press any tab to rename it (the name stays even when the
+  program changes its title), give it a color, duplicate it, reconnect or restart
+  it, move it left/right, copy its output, clear scrollback, reset the terminal,
+  or close it and the others. Names and colors survive an app restart.
 - **Twenty complete themes** — matching app controls, terminal colors, dialogs, and
   system bars, including five light palettes and OLED-black options.
 - **On-screen extra keys** — ESC / TAB / CTRL / arrows / pipe / slash, plus a
@@ -88,6 +92,8 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
       a preset (Full, Minimal, SSH & tmux) or reorder/toggle individual keys;
       persisted across restarts. Default is the original row. See
       `ExtraKeys.kt` / `ExtraKeysUi.kt`.
+- [x] **Tab long-press menu** — rename (pinned), color, duplicate, reconnect/restart,
+      reorder, copy output, clear scrollback, reset, close others. See `TabMenu.kt`.
 
 ## License
 

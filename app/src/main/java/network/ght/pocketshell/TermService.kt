@@ -23,11 +23,20 @@ import com.termux.terminal.TerminalSession
 /** One live terminal tab. State is observable so tab labels/dots update reactively. */
 class TermSession(
     val id: Int,
+    /** Automatic title: "linux N" until the running program sets one (OSC 0/2). */
     val label: MutableState<String>,
     val alive: MutableState<Boolean>,
     val session: TerminalSession,
     val mode: SessionMode,
-)
+    /** The command the tab exists to run (an SSH connection), so it can reconnect or be duplicated. */
+    val startupCommand: String? = null,
+    /** User-chosen name. Once set it is pinned: program title changes no longer relabel the tab. */
+    val customName: MutableState<String?> = mutableStateOf(null),
+    /** [TabColors] id, or null for the default accent. */
+    val color: MutableState<String?> = mutableStateOf(null),
+) {
+    val displayName: String get() = customName.value ?: label.value
+}
 
 /**
  * Foreground service that OWNS the terminal sessions. This is what makes Pocket Shell
@@ -89,25 +98,127 @@ class TermService : Service() {
         return START_STICKY
     }
 
-    fun newSession(mode: SessionMode, startupCommand: String? = null): TermSession {
-        val id = nextId++
-        val prefix = if (mode == SessionMode.LINUX) "linux" else "sh"
-        val label = mutableStateOf("$prefix $id")
-        val alive = mutableStateOf(true)
-        val session = TermCore.newSession(
-            this,
+    fun newSession(
+        mode: SessionMode,
+        startupCommand: String? = null,
+        insertAt: Int? = null,
+        customName: String? = null,
+        color: String? = null,
+    ): TermSession {
+        val holder = spawn(
             mode,
+            runCommand = startupCommand,
             startupCommand = startupCommand,
-            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, mode, s) },
-            onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
-            onFinished = { alive.value = false; refreshNotification() },
+            customName = customName,
+            color = color,
         )
-        val holder = TermSession(id, label, alive, session, mode)
-        sessions.add(holder)
+        sessions.add(insertAt?.coerceIn(0, sessions.size) ?: sessions.size, holder)
         acquireWakeLock()
         refreshNotification()
         persistSnapshot()
         return holder
+    }
+
+    /**
+     * Builds one tab around a new PTY. [runCommand] is what the shell executes
+     * now; [startupCommand] is what the tab is *for* — they differ only for a
+     * restored SSH tab, which comes back as a plain shell that can Reconnect.
+     */
+    private fun spawn(
+        mode: SessionMode,
+        cwd: String? = null,
+        runCommand: String?,
+        startupCommand: String?,
+        title: String? = null,
+        customName: String? = null,
+        color: String? = null,
+    ): TermSession {
+        val id = nextId++
+        val prefix = if (mode == SessionMode.LINUX) "linux" else "sh"
+        val label = mutableStateOf(title?.takeIf { it.isNotBlank() } ?: "$prefix $id")
+        val alive = mutableStateOf(true)
+        val session = TermCore.newSession(
+            this,
+            mode,
+            cwd = cwd,
+            startupCommand = runCommand,
+            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, mode, s) },
+            onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
+            onFinished = { alive.value = false; refreshNotification() },
+        )
+        return TermSession(
+            id, label, alive, session, mode,
+            startupCommand = startupCommand,
+            customName = mutableStateOf(TabNames.normalize(customName)),
+            color = mutableStateOf(TabColors.byId(color)?.id),
+        )
+    }
+
+    /** Pins a user-chosen tab name; null or blank returns the tab to its automatic title. */
+    fun renameSession(holder: TermSession, name: String?) {
+        holder.customName.value = TabNames.normalize(name)
+        persistSnapshot()
+    }
+
+    /** Sets the tab color by [TabColors] id; null or an unknown id restores the default. */
+    fun setSessionColor(holder: TermSession, colorId: String?) {
+        holder.color.value = TabColors.byId(colorId)?.id
+        persistSnapshot()
+    }
+
+    /** Opens a second tab right after [holder], same mode, command, name and color. */
+    fun duplicateSession(holder: TermSession): TermSession {
+        val index = sessions.indexOf(holder)
+        return newSession(
+            holder.mode,
+            startupCommand = holder.startupCommand,
+            insertAt = if (index < 0) null else index + 1,
+            customName = holder.customName.value,
+            color = holder.color.value,
+        )
+    }
+
+    /**
+     * Ends [holder]'s process (if still running) and starts a fresh one in the
+     * same tab slot — an SSH tab reconnects. Name, color and automatic title
+     * carry over; the new tab gets fresh alive/label state so the old PTY's
+     * late exit callback can't mark the replacement as ended.
+     */
+    fun restartSession(holder: TermSession): TermSession? {
+        val index = sessions.indexOf(holder)
+        if (index < 0) return null
+        val fresh = spawn(
+            holder.mode,
+            runCommand = holder.startupCommand,
+            startupCommand = holder.startupCommand,
+            title = holder.label.value,
+            customName = holder.customName.value,
+            color = holder.color.value,
+        )
+        runCatching { holder.session.finishIfRunning() }
+        TranscriptLogger.reset(holder.id)
+        sessions[index] = fresh
+        acquireWakeLock()
+        refreshNotification()
+        persistSnapshot()
+        return fresh
+    }
+
+    /** Moves [holder] by [delta] positions, clamped to the strip. Returns whether it moved. */
+    fun moveSession(holder: TermSession, delta: Int): Boolean {
+        val from = sessions.indexOf(holder)
+        if (from < 0) return false
+        val to = (from + delta).coerceIn(0, sessions.size - 1)
+        if (to == from) return false
+        sessions.removeAt(from)
+        sessions.add(to, holder)
+        persistSnapshot()
+        return true
+    }
+
+    /** Closes every tab except [keep]. */
+    fun closeOtherSessions(keep: TermSession) {
+        sessions.filter { it !== keep }.forEach(::closeSession)
     }
 
     fun closeSession(holder: TermSession) {
@@ -153,26 +264,24 @@ class TermService : Service() {
     }
 
     private fun restoreSession(entry: SessionStore.Saved): TermSession {
-        val id = nextId++
-        val fallbackPrefix = if (entry.mode == SessionMode.LINUX) "linux" else "sh"
-        val label = mutableStateOf(entry.title.ifBlank { "$fallbackPrefix $id" })
-        val alive = mutableStateOf(true)
-        val session = TermCore.newSession(
-            this,
+        // A restored SSH tab comes back as a plain shell (never an unasked-for
+        // reconnect) but remembers its command, so the tab menu can Reconnect.
+        val holder = spawn(
             entry.mode,
             cwd = entry.cwd,
-            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, entry.mode, s) },
-            onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
-            onFinished = { alive.value = false; refreshNotification() },
+            runCommand = null,
+            startupCommand = entry.startupCommand,
+            title = entry.title,
+            customName = entry.customName,
+            color = entry.color,
         )
         // Spawn now, at a default size — TerminalView.attachSession() later just
         // resizes this (reflowing the buffer) rather than respawning, since the
         // emulator already exists. That lets us inject the saved scrollback
         // before any real UI has attached.
-        session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
-        injectRestoredTranscript(session, entry.transcript)
+        holder.session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
+        injectRestoredTranscript(holder.session, entry.transcript)
 
-        val holder = TermSession(id, label, alive, session, entry.mode)
         sessions.add(holder)
         acquireWakeLock()
         return holder
@@ -208,6 +317,9 @@ class TermService : Service() {
                 transcript = runCatching {
                     holder.session.emulator?.screen?.transcriptText
                 }.getOrNull().orEmpty(),
+                customName = holder.customName.value,
+                color = holder.color.value,
+                startupCommand = holder.startupCommand,
             )
         }
         SessionStore.save(this, snap)

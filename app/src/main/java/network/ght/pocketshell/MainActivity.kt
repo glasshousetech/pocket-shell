@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.view.KeyEvent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -138,6 +146,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
     var textInputSessionId by remember { mutableStateOf<Int?>(null) }
+    var renameSessionId by remember { mutableStateOf<Int?>(null) }
     val textDrafts = remember { mutableStateMapOf<Int, String>() }
     // Persisted extra-keys layout (preset or customized); default is the
     // original hardcoded row, so nothing changes until the user picks one.
@@ -208,13 +217,20 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     fun closeSession(index: Int) {
         val holder = sessions.getOrNull(index) ?: return
+        // The tab menu can close a tab that isn't the visible one; keep the
+        // visible tab on screen instead of letting its index slide onto a neighbor.
+        val visible = sessions.getOrNull(activeIndex.coerceIn(0, sessions.size - 1))
         service.closeSession(holder)
         if (sessions.isEmpty()) {
             if (Userland.installedDistro(ctx) != null) addSession(SessionMode.LINUX)
             else distroPickerOpen = true
             return
         }
-        activeIndex = activeIndex.coerceIn(0, sessions.size - 1)
+        activeIndex = if (visible != null && visible !== holder) {
+            sessions.indexOf(visible).coerceAtLeast(0)
+        } else {
+            activeIndex.coerceIn(0, sessions.size - 1)
+        }
         termViewRef.value?.let {
             it.attachSession(sessions[activeIndex].session)
             it.onScreenUpdated()
@@ -401,12 +417,86 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         }
     }
 
+    // Makes [holder] the visible tab and attaches it right away, so an action
+    // that swaps the PTY (restart, duplicate) never shows the old one.
+    fun show(holder: TermSession, keyboard: Boolean = false) {
+        activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
+        termViewRef.value?.let { view ->
+            if (view.currentSession !== holder.session) view.attachSession(holder.session)
+            view.onScreenUpdated()
+            if (keyboard) viewClient.showKeyboard()
+        }
+    }
+
+    fun repaintIfVisible(holder: TermSession) {
+        termViewRef.value?.let { if (it.currentSession === holder.session) it.onScreenUpdated() }
+    }
+
+    fun notice(text: String) = Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show()
+
+    fun onTabAction(holder: TermSession, action: TabAction) {
+        if (holder !in sessions) return
+        val visible = sessions.getOrNull(activeIndex.coerceIn(0, sessions.size - 1))
+        when (action) {
+            TabAction.Rename -> renameSessionId = holder.id
+            is TabAction.SetColor -> service.setSessionColor(holder, action.colorId)
+            TabAction.Duplicate -> {
+                if (holder.mode == SessionMode.LINUX && Userland.installedDistro(ctx) == null) {
+                    distroPickerOpen = true
+                } else {
+                    show(service.duplicateSession(holder), keyboard = true)
+                }
+            }
+            TabAction.Restart -> service.restartSession(holder)?.let { fresh ->
+                textDrafts.remove(holder.id)?.let { textDrafts[fresh.id] = it }
+                show(fresh, keyboard = true)
+            }
+            TabAction.MoveLeft, TabAction.MoveRight -> {
+                service.moveSession(holder, if (action == TabAction.MoveLeft) -1 else 1)
+                // Keep the same tab on screen; only its position changed.
+                visible?.let { activeIndex = sessions.indexOf(it).coerceAtLeast(0) }
+            }
+            TabAction.CopyOutput -> {
+                val text = TabOutput.forClipboard(runCatching { holder.session.emulator?.screen?.transcriptText }.getOrNull())
+                if (text.isBlank()) {
+                    notice("Nothing to copy in this tab yet")
+                } else {
+                    runCatching { Clip.copy(text) }
+                        .onSuccess {
+                            // Android 13+ shows its own clipboard confirmation.
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) notice("Tab output copied")
+                        }
+                        .onFailure { notice("Couldn't copy: ${it.message ?: "clipboard unavailable"}") }
+                }
+            }
+            TabAction.ClearScrollback -> {
+                holder.session.emulator?.screen?.clearTranscript()
+                repaintIfVisible(holder)
+            }
+            TabAction.ResetTerminal -> {
+                // Termux's reset() dereferences the emulator, which only exists
+                // once the tab has been shown at least once.
+                if (holder.session.emulator != null) {
+                    holder.session.reset()
+                    repaintIfVisible(holder)
+                }
+            }
+            TabAction.CloseOthers -> {
+                service.closeOtherSessions(holder)
+                show(holder)
+            }
+            TabAction.Close -> closeSession(sessions.indexOf(holder))
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         TabRail(
-            sessions = sessions.map { it.label.value to it.alive.value },
+            sessions = sessions,
             activeIndex = activeIndex,
             onSelect = { activeIndex = it },
             onClose = { closeSession(it) },
+            onTabAction = ::onTabAction,
+            onMenuOpened = { viewClient.hideKeyboard() },
             onAdd = { addLinux() },
             onConnect = {
                 viewClient.hideKeyboard()
@@ -551,6 +641,19 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         )
     }
 
+    val renameTarget = sessions.firstOrNull { it.id == renameSessionId }
+    if (renameTarget != null) {
+        RenameTabDialog(
+            customName = renameTarget.customName.value,
+            automaticTitle = renameTarget.label.value,
+            onSave = { name ->
+                service.renameSession(renameTarget, name)
+                renameSessionId = null
+            },
+            onDismiss = { renameSessionId = null },
+        )
+    }
+
     if (settingsOpen) {
         SettingsDialog(
             onThemes = { settingsOpen = false; themeOpen = true },
@@ -659,10 +762,12 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TabRail(
-    sessions: List<Pair<String, Boolean>>,
+    sessions: List<TermSession>,
     activeIndex: Int,
     onSelect: (Int) -> Unit,
     onClose: (Int) -> Unit,
+    onTabAction: (TermSession, TabAction) -> Unit,
+    onMenuOpened: () -> Unit,
     onAdd: () -> Unit,
     onConnect: () -> Unit,
     onAddLinux: () -> Unit,
@@ -671,6 +776,9 @@ private fun TabRail(
     onCopilot: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    // Keyed by session id, not index: tabs move, close and restart under it.
+    var menuFor by remember { mutableStateOf<Int?>(null) }
+    val haptics = LocalHapticFeedback.current
     Column(modifier = Modifier.fillMaxWidth().background(RailSurfaceAlt)) {
         Row(
             modifier = Modifier
@@ -679,46 +787,92 @@ private fun TabRail(
                 .padding(6.dp, 6.dp, 6.dp, 3.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            sessions.forEachIndexed { i, (label, alive) ->
-                val active = i == activeIndex
-                Column(
-                    modifier = Modifier
-                        .width(IntrinsicSize.Max)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (active) RailBg else RailSurface)
-                        .clickable { onSelect(i) },
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    ) {
-                        Text("●", color = if (alive) RailAccent else RailDimText, fontSize = 9.sp)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            label,
-                            color = if (active) RailPromptText else RailAccentDim,
-                            fontFamily = RailMono,
-                            fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                        )
-                        if (active) {
-                            Text(
-                                "×",
-                                color = RailDimText,
-                                fontSize = 15.sp,
-                                modifier = Modifier
-                                    .padding(start = 10.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .clickable { onClose(i) }
-                                    .padding(horizontal = 3.dp),
+            sessions.forEachIndexed { i, holder ->
+                key(holder.id) {
+                    val active = i == activeIndex
+                    val alive = holder.alive.value
+                    val tint = tabColor(holder.color.value)
+                    // Box anchors the long-press menu directly under this tab.
+                    Box {
+                        Column(
+                            modifier = Modifier
+                                // Intrinsic width lets the underline span the tab
+                                // inside the horizontally scrolling strip.
+                                .width(IntrinsicSize.Max)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (active) RailBg else RailSurface)
+                                .then(if (tint != null) Modifier.background(tint.copy(alpha = if (active) 0.18f else 0.10f)) else Modifier)
+                                .combinedClickable(
+                                    onClickLabel = "Switch to tab",
+                                    onLongClickLabel = "Tab options",
+                                    onClick = { onSelect(i) },
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        menuFor = holder.id
+                                        onMenuOpened()
+                                    },
+                                )
+                                .semantics {
+                                    selected = active
+                                    stateDescription = if (alive) "running" else "ended"
+                                },
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    "●",
+                                    color = if (alive) tint ?: RailAccent else RailDimText,
+                                    fontSize = 9.sp,
+                                    modifier = Modifier.clearAndSetSemantics {},
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    holder.displayName,
+                                    color = if (active) RailPromptText else RailAccentDim,
+                                    fontFamily = RailMono,
+                                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    // A long pinned name or remote title must not
+                                    // push every other tab off a phone screen.
+                                    modifier = Modifier.widthIn(max = 168.dp),
+                                )
+                                if (active) {
+                                    Text(
+                                        "×",
+                                        color = RailDimText,
+                                        fontSize = 15.sp,
+                                        modifier = Modifier
+                                            .padding(start = 10.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .clickable(onClickLabel = "Close tab") { onClose(i) }
+                                            .padding(horizontal = 3.dp),
+                                    )
+                                }
+                            }
+                            Box(
+                                Modifier.fillMaxWidth().height(2.dp)
+                                    .background(
+                                        when {
+                                            active -> tint ?: RailAccent
+                                            tint != null -> tint.copy(alpha = 0.55f)
+                                            else -> Color.Transparent
+                                        },
+                                    ),
                             )
                         }
+                        TabMenu(
+                            expanded = menuFor == holder.id,
+                            holder = holder,
+                            index = i,
+                            count = sessions.size,
+                            onDismiss = { if (menuFor == holder.id) menuFor = null },
+                            onAction = { action -> onTabAction(holder, action) },
+                        )
                     }
-                    Box(
-                        Modifier.fillMaxWidth().height(2.dp)
-                            .background(if (active) RailAccent else Color.Transparent),
-                    )
                 }
             }
         }
