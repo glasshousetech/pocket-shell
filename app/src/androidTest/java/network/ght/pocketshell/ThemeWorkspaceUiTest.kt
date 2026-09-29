@@ -4,6 +4,8 @@ import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.ServiceTestRule
@@ -50,6 +52,30 @@ class ThemeWorkspaceUiTest {
                 fun hideKeyboard() {
                     activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                     device.waitForIdle()
+                    // UIAutomator idle is not an IME/layout completion signal.
+                    // A history offset is comparable only at the same viewport size.
+                    val deadline = android.os.SystemClock.uptimeMillis() + 5000
+                    var previousHeight = -1
+                    var stable = 0
+                    while (stable < 4 && android.os.SystemClock.uptimeMillis() < deadline) {
+                        activity.onActivity {
+                            val v = terminal(it.window.decorView)
+                            val ime = ViewCompat.getRootWindowInsets(it.window.decorView)
+                                ?.isVisible(WindowInsetsCompat.Type.ime()) ?: true
+                            val height = v?.height ?: 0
+                            stable = if (!ime && height > 0 && height == previousHeight && v?.isLayoutRequested == false) stable + 1 else 0
+                            previousHeight = height
+                        }
+                        Thread.sleep(100)
+                    }
+                    assertEquals("Keyboard must be hidden and terminal layout settled", 4, stable)
+                }
+                fun reportHistory(stage: String) = activity.onActivity {
+                    val v = terminal(it.window.decorView)!!
+                    val emulator = v.currentSession.emulator
+                    instrumentation.sendStatus(2, android.os.Bundle().apply {
+                        putString("stream", "HISTORY $stage: top=${v.topRow}, rows=${emulator.mRows}, history=${emulator.screen.activeTranscriptRows}, height=${v.height}\n")
+                    })
                 }
                 fun openThemes() {
                     hideKeyboard()
@@ -107,14 +133,24 @@ class ThemeWorkspaceUiTest {
                 }
                 // Populate scrollback and verify recoloring doesn't jump to live output.
                 instrumentation.runOnMainSync { fixtures.first().session.write("i=1; while [ \"$" + "i\" -le 120 ]; do echo history-$" + "i; i=$" + "((i+1)); done\n") }
-                Thread.sleep(1200)
+                val historyDeadline = android.os.SystemClock.uptimeMillis() + 5000
+                var historyReady = false
+                while (!historyReady && android.os.SystemClock.uptimeMillis() < historyDeadline) {
+                    instrumentation.runOnMainSync { historyReady = fixtures.first().session.emulator.screen.transcriptText.contains("history-120") }
+                    if (!historyReady) Thread.sleep(50)
+                }
+                assertTrue("History fixture output must finish before anchoring", historyReady)
                 hideKeyboard()
                 var top = 0
                 activity.onActivity { terminal(it.window.decorView)!!.let { v -> v.topRow = -12; top = v.topRow; v.invalidate() } }
+                reportHistory("before picker")
                 openThemes()
+                reportHistory("picker open")
                 device.findObject(By.clazz("android.widget.EditText")).text = "Obsidian"
+                reportHistory("search entered")
                 device.wait(Until.findObject(By.desc("Apply theme Obsidian")), 4000).click()
                 hideKeyboard()
+                reportHistory("after apply and IME settled")
                 activity.onActivity { assertEquals("Keep the scrollback position", top, terminal(it.window.decorView)!!.topRow) }
 
                 openThemes()
