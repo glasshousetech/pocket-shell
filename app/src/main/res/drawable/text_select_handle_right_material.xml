@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  See text_select_handle_left_material.xml — same override, right-hand handle.
+  See text_select_handle_left_material.xml — same handle, right-hand side.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"

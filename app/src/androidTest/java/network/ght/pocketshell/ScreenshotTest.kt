@@ -49,14 +49,14 @@ class ScreenshotTest {
         }
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            device.wait(Until.findObject(By.clazz("com.termux.view.TerminalView")), 10_000)
+            device.wait(Until.findObject(By.clazz("network.ght.pocketshell.term.TerminalView")), 10_000)
             Thread.sleep(1_500) // let the shell prompt actually render
             capture("launch_shell")
 
             // Focus the terminal (window focus alone doesn't route text input;
             // it needs an explicit tap, same as verified manually this session),
             // then run a real command and capture its output.
-            device.findObject(By.clazz("com.termux.view.TerminalView"))?.click()
+            device.findObject(By.clazz("network.ght.pocketshell.term.TerminalView"))?.click()
             Thread.sleep(300)
             device.executeShellCommand("input text echo%sPOCKETSHELL_SCREENSHOT_DEMO")
             device.pressEnter()
@@ -66,6 +66,18 @@ class ScreenshotTest {
             device.findObject(By.text("⚙"))?.click()
             device.wait(Until.findObject(By.text("AI Copilot")), 5_000)
             capture("settings")
+
+            // The Keyboard section sits below the AI block in the scrolling dialog.
+            repeat(5) {
+                if (device.findObject(By.text("Keyboard")) == null) {
+                    device.swipe(
+                        device.displayWidth / 2, (device.displayHeight * 0.70).toInt(),
+                        device.displayWidth / 2, (device.displayHeight * 0.40).toInt(), 12,
+                    )
+                    Thread.sleep(400)
+                }
+            }
+            capture("settings_keyboard")
             device.pressBack()
             Thread.sleep(300)
 

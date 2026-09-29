@@ -3,7 +3,7 @@ package network.ght.pocketshell
 import android.view.KeyEvent
 import com.termux.terminal.KeyHandler
 import com.termux.terminal.TerminalEmulator
-import com.termux.view.TerminalView
+import network.ght.pocketshell.term.TerminalView
 
 /** UI policies layered over the pinned terminal engine without changing its key protocol. */
 object TerminalInteraction {

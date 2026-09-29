@@ -98,6 +98,19 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest
             --no-daemon --stacktrace
 
+      # Gradle prints only a pass/fail summary, so without this there is no way
+      # to tell from a green run which tests actually executed. The XML results
+      # name every test method and its outcome.
+      - name: Upload instrumentation test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-instrumentation-report
+          path: |
+            app/build/reports/androidTests/connected/**
+            app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: warn
+
   screenshots:
     # Manual-only: walks the app through a few real screens on a booted
     # emulator and uploads what it looked like. UI-coordinate/text automation
