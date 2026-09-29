@@ -183,6 +183,9 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            # Without this the API 33+ runtime permission dialog covers the app on
+            # first launch and every screenshot is a picture of that dialog.
+            adb shell pm grant network.ght.pocketshell android.permission.POST_NOTIFICATIONS
             adb shell am instrument -w -e class network.ght.pocketshell.ScreenshotTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
             # A single direct `run-as tar` (no `sh -c '... && ...'` wrapper —
             # that combination reliably failed with "No such file or

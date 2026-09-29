@@ -58,7 +58,9 @@ class TerminalInteractionTest {
         fail("Expected $expected in controlled PTY output: $text")
     }
 
-    private fun receiver(bytes: Int) = "stty raw -echo; printf 'INPUT_READY\\r\\n'; dd bs=1 count=$bytes 2>/dev/null | od -An -tx1"
+    // Keep the PTY alive until assertions drain its output; immediate exit can
+    // deliver the process-finished event before the final stdout event.
+    private fun receiver(bytes: Int) = "stty raw -echo; printf 'INPUT_READY\\r\\n'; dd bs=1 count=$bytes 2>/dev/null | od -An -tx1; sleep 30"
 
     @Test fun ctrlBIsOneShotAndAltBUsesEscapePrefix() = terminal(receiver(4)) { view, client, session ->
         waitFor(session, "INPUT_READY")

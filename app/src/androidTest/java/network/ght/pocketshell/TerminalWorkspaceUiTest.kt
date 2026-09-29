@@ -42,6 +42,16 @@ class TerminalWorkspaceUiTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
                 assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 8000))
+                // A short deterministic prompt avoids mksh horizontally scrolling
+                // the command out of the screen on the smallest hosted viewport.
+                instrumentation.runOnMainSync { fixture.session.write("PS1='> '; clear; echo UI_FIXTURE_READY\n") }
+                val readyDeadline = System.currentTimeMillis() + 4000
+                var ready = false
+                while (!ready && System.currentTimeMillis() < readyDeadline) {
+                    instrumentation.runOnMainSync { ready = fixture.session.emulator.screen.transcriptText.contains("UI_FIXTURE_READY") }
+                    if (!ready) Thread.sleep(30)
+                }
+                assertTrue("Fixture shell is ready", ready)
                 // Close the terminal keyboard for a full-height workspace preview.
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                 device.waitForIdle()
@@ -50,8 +60,8 @@ class TerminalWorkspaceUiTest {
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
                 val editor = device.findObject(By.clazz("android.widget.EditText"))
                 assertNotNull(editor)
-                editor.text = "printf UX_COMMAND_EXECUTED"
-                assertTrue(device.wait(Until.hasObject(By.text("printf UX_COMMAND_EXECUTED")), 4000))
+                editor.text = "printf UX_PROOF"
+                assertTrue(device.wait(Until.hasObject(By.text("printf UX_PROOF")), 4000))
                 device.waitForIdle()
                 device.takeScreenshot(File(dir, "text-voice-portrait.png"))
                 device.findObject(By.text("Insert")).click()
@@ -76,12 +86,12 @@ class TerminalWorkspaceUiTest {
                     assertTrue(fixture.alive.value)
                 }
                 // The entered text appears once as shell input. Execution would
-                // print UX_COMMAND_EXECUTED a second time on its own line.
+                // print UX_PROOF a second time on its own line.
                 Thread.sleep(300)
                 instrumentation.runOnMainSync {
                     val output = fixture.session.emulator.screen.transcriptText
-                    assertTrue(output.contains("printf UX_COMMAND_EXECUTED"))
-                    assertEquals(1, Regex("UX_COMMAND_EXECUTED").findAll(output).count())
+                    assertTrue(output.contains("printf UX_PROOF"))
+                    assertEquals(1, Regex("UX_PROOF").findAll(output).count())
                 }
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                 device.setOrientationLeft()
