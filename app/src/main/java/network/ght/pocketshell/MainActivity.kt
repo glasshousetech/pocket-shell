@@ -420,7 +420,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             AndroidView(
                 modifier = Modifier.matchParentSize(),
                 factory = { c ->
-                    TerminalView(c, null).apply {
+                    HistoryPreservingTerminalView(c).apply {
                         setTerminalViewClient(viewClient)
                         viewClient.view = this
                         keepScreenOn = true

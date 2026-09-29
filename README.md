@@ -3,15 +3,15 @@
 A fast, good-looking terminal emulator for Android — by Glass House Technologies.
 
 Pocket Shell pairs a **real PTY-backed terminal** (so `vim`, `ssh`, `htop`, `less`, and
-tab-completion all work) with a modern **Tab Rail** multi-session UI and a Kali-style
-frosted-glass look. The goal is a terminal that feels like a native app, not a
+tab-completion all work) with a modern **Tab Rail** multi-session UI and twenty coordinated
+app and terminal themes. The goal is a terminal that feels like a native app, not a
 1990s console bolted onto a phone.
 
 ## Why Pocket Shell over the alternatives
 
 - **Tab Rail** — multiple live shells in one window, switch instantly. No swipe-drawer.
-- **Frosted glass** — real window blur (Android 12+) so the terminal sits over your
-  wallpaper instead of a flat black rectangle.
+- **Twenty complete themes** — matching app controls, terminal colors, dialogs, and
+  system bars, including five light palettes and OLED-black options.
 - **On-screen extra keys** — ESC / TAB / CTRL / arrows / pipe / slash, plus a
   Ctrl-combo pad (^C ^D ^Z ^L ^A ^E ^R), because phones don't have those keys.
 - **Pinch to zoom** the font, sticky modifiers, copy/paste — the ergonomics you expect.
@@ -59,7 +59,7 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
 ## Roadmap
 
 - [x] Real PTY terminal engine (Termux `terminal-view`)
-- [x] Tab Rail multi-session UI + frosted glass
+- [x] Tab Rail multi-session UI + complete app themes
 - [x] On-screen extra keys + Ctrl pad, pinch-to-zoom, clipboard
 - [x] CI build + signed release pipeline
 - [x] **Userland / package manager** — tap the 🐧 tab to pick a distro (**Alpine
@@ -71,9 +71,9 @@ Everything builds in CI — no Android SDK/NDK needed locally to ship. To build 
 - [x] **Text selection** — long-press to select a word, drag the handles to
       extend, floating Copy/Paste toolbar, tap elsewhere to deselect (built on
       terminal-view's own `TextSelectionCursorController`; see `TermView.kt`).
-- [x] **Color themes** — Kali default, Dracula, Solarized Dark, Nord, Gruvbox
-      Dark. Tap the 🎨 tab; persisted across restarts. See `TermTheme.kt` /
-      `ThemeUi.kt`.
+- [x] **Twenty whole-app themes** — tap **Theme** or **Settings → Browse 20 themes**.
+      Search and filter by dark, light, or OLED; selections persist across restarts.
+      See [the shared catalog](themes/README.md).
 - [x] Session persistence across process death (best-effort scrollback replay; see `SessionStore.kt`)
 - [x] SSH connection workspace with saved custom host and tmux reconnect
 - [x] Bounded, recoverable provisioning with mandatory full-toolchain verification
