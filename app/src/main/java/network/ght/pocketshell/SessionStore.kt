@@ -32,6 +32,12 @@ object SessionStore {
         val title: String,
         val cwd: String?,
         val transcript: String,
+        /** Pinned tab name from the tab menu; null = automatic title. */
+        val customName: String? = null,
+        /** [TabColors] id; null = default accent. */
+        val color: String? = null,
+        /** SSH command the tab was opened for (host/user/port/tmux only — no secrets). */
+        val startupCommand: String? = null,
     )
 
     private fun file(context: Context): File = File(context.noBackupFilesDir, FILE_NAME)
@@ -58,6 +64,9 @@ object SessionStore {
                 o.put("title", s.title)
                 if (!s.cwd.isNullOrBlank()) o.put("cwd", s.cwd)
                 o.put("transcript", capTranscript(s.transcript))
+                if (!s.customName.isNullOrBlank()) o.put("name", s.customName)
+                if (!s.color.isNullOrBlank()) o.put("color", s.color)
+                if (!s.startupCommand.isNullOrBlank()) o.put("startup", s.startupCommand)
                 arr.put(o)
             }
             val root = JSONObject().put("version", VERSION).put("sessions", arr)
@@ -90,6 +99,9 @@ object SessionStore {
                     title = o.optString("title").ifBlank { "sh" },
                     cwd = o.optString("cwd").takeIf { it.isNotBlank() },
                     transcript = o.optString("transcript"),
+                    customName = o.optString("name").takeIf { it.isNotBlank() },
+                    color = o.optString("color").takeIf { it.isNotBlank() },
+                    startupCommand = o.optString("startup").takeIf { it.isNotBlank() },
                 )
             }
         }.getOrElse { emptyList() }

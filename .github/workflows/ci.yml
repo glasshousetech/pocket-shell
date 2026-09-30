@@ -100,11 +100,11 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -r -w -e class network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb shell am instrument -r -w -e class network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.TabMenuUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
             mkdir -p app/build/outputs/theme-screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
             tar xf app/build/outputs/theme-screenshots.tar -C app/build/outputs/theme-screenshots
-            grep -q "OK (11 tests)" instrument-output.txt
+            grep -q "OK (12 tests)" instrument-output.txt
 
       - name: Upload theme and terminal UI evidence
         if: always()
@@ -171,6 +171,9 @@ jobs:
           api-level: 34
           arch: x86_64
           target: default
+          # Phone-sized screenshots for design review (the runner's default
+          # AVD is a 320x640 mdpi screen).
+          profile: pixel_7
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
@@ -187,6 +190,16 @@ jobs:
             # first launch and every screenshot is a picture of that dialog.
             adb shell pm grant network.ght.pocketshell android.permission.POST_NOTIFICATIONS
             adb shell am instrument -w -e class network.ght.pocketshell.ScreenshotTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            # Tab long-press menu: once at phone size, once at an unfolded-
+            # foldable size (file names carry the width in dp), then restore.
+            adb shell am instrument -w -e class network.ght.pocketshell.TabMenuUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee tab-menu-phone.txt
+            # About 750x835dp, the proportions of an unfolded foldable. Smaller
+            # than the physical panel, so the override renders reliably.
+            adb shell wm size 1080x1200
+            adb shell wm density 230
+            adb shell am instrument -w -e class network.ght.pocketshell.TabMenuUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee tab-menu-unfolded.txt
+            adb shell wm size reset
+            adb shell wm density reset
             # A single direct `run-as tar` (no `sh -c '... && ...'` wrapper —
             # that combination reliably failed with "No such file or
             # directory" even though the directory demonstrably existed).
@@ -200,10 +213,18 @@ jobs:
             tar xf app/build/outputs/screenshots.tar -C app/build/outputs/screenshots
             ls -la app/build/outputs/screenshots
             grep -q "OK (1 test)" instrument-output.txt
+            grep -q "OK (1 test)" tab-menu-phone.txt
+            grep -q "OK (1 test)" tab-menu-unfolded.txt
 
       - name: Upload screenshots
+        # Upload even when a UI run fails, so the failure can be seen.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pocketshell-screenshots
-          path: app/build/outputs/screenshots
+          path: |
+            app/build/outputs/screenshots
+            instrument-output.txt
+            tab-menu-phone.txt
+            tab-menu-unfolded.txt
           if-no-files-found: error
