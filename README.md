@@ -18,6 +18,11 @@ app and terminal themes. The goal is a terminal that feels like a native app, no
 - **One-tap remote workspaces** — Connect opens `agent.ght.network` or a saved
   SSH host inside a named tmux session, so a mobile-network drop does not kill
   the running agent CLI.
+- **GHT machine shortcuts** — Connect has cards for the laptop, MOB, dev, deploy
+  and SFO servers, and the same names work typed (`ssh alientop.ght.network`,
+  `ssh mob`, `ssh dev`). Each hops through the agent droplet with `ght-hop`, so
+  the phone key only needs gh-cloud-01. The aliases live in an app-managed
+  `~/.ssh/config.d/pocketshell-ght.conf`; your own `~/.ssh/config` is kept.
 - **Linux-only first run** — Ubuntu is recommended and Pocket Shell never drops
   the user into Android's limited toybox shell. Setup must verify the complete
   developer toolchain and an SSH identity before a terminal can open.

@@ -30,6 +30,8 @@ data class SshProfile(
     val user: String = "",
     val port: Int = 22,
     val tmuxSession: String = "agents",
+    /** Runs instead of tmux when set (the GHT machine hops). */
+    val remoteCommand: String = "",
 ) {
     fun command(): String {
         val safeHost = host.trim().takeIf { it.matches(Regex("[A-Za-z0-9._:-]+")) }
@@ -42,6 +44,11 @@ data class SshProfile(
         val base = "ssh -t -p $safePort -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes " +
             "-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 " +
             "-o ServerAliveCountMax=3 -o ConnectTimeout=15 $destination"
+        val remote = remoteCommand.trim()
+        if (remote.isNotEmpty()) {
+            require(remote.matches(Regex("[A-Za-z0-9._/~ -]+"))) { "Remote command contains unsupported characters." }
+            return "$base '$remote'"
+        }
         val session = tmuxSession.trim()
         return if (session.isEmpty()) base else {
             require(session.matches(Regex("[A-Za-z0-9._-]+"))) { "tmux session contains unsupported characters." }
@@ -105,9 +112,10 @@ fun ConnectionsDialog(
     var keyCopied by remember { mutableStateOf(false) }
     val maxHeight = with(LocalConfiguration.current) { (screenHeightDp * .88f).dp }
 
-    fun connect(profile: SshProfile) {
+    // Built-in cards must not overwrite the user's saved server.
+    fun connect(profile: SshProfile, remember: Boolean = true) {
         runCatching { profile.command() }
-            .onSuccess { SshProfiles.save(ctx, profile); onConnect(profile) }
+            .onSuccess { if (remember) SshProfiles.save(ctx, profile); onConnect(profile) }
             .onFailure { error = it.message }
     }
 
@@ -124,7 +132,18 @@ fun ConnectionsDialog(
             )
 
             ConnectionCard(SshProfiles.agentDroplet, "ssh agent.ght.network • tmux agents") {
-                connect(SshProfiles.agentDroplet)
+                connect(SshProfiles.agentDroplet, remember = false)
+            }
+
+            Text("GHT machines", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(
+                "Each hops through the agent droplet and stays in a droplet tmux session. Typed shortcuts work too, e.g. ssh alientop.ght.network.",
+                color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
+            )
+            SshShortcuts.machines.forEach { machine ->
+                ConnectionCard(SshShortcuts.profile(machine), "ssh ${machine.aliases.first()} • ${machine.detail}") {
+                    connect(SshShortcuts.profile(machine), remember = false)
+                }
             }
 
             Box(Modifier.fillMaxWidth().height(1.dp).background(RailKeyChip))

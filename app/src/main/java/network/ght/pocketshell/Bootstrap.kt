@@ -281,14 +281,8 @@ object Bootstrap {
         File(root, "etc/profile.d").mkdirs()
         File(root, "root/.ssh").apply { mkdirs(); Os.chmod(absolutePath, 448) }
         File(root, "tmp").apply { mkdirs(); Os.chmod(absolutePath, 1023) } // 01777
-        val sshConfig = File(root, "root/.ssh/config")
-        if (!sshConfig.exists()) {
-            sshConfig.writeText(
-                "Host *\n  ServerAliveInterval 30\n  ServerAliveCountMax 3\n" +
-                    "  TCPKeepAlive yes\n  IdentitiesOnly yes\n  IdentityFile ~/.ssh/id_ed25519\n"
-            )
-        }
-        Os.chmod(sshConfig.absolutePath, 384)
+        // Default client config plus the app-managed GHT machine shortcuts.
+        SshShortcuts.install(root)
 
         when (distro) {
             Distro.Alpine -> {
