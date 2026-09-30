@@ -46,6 +46,7 @@ import network.ght.pocketshell.term.TerminalView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val serviceState = mutableStateOf<TermService?>(null)
@@ -268,6 +269,14 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     LaunchedEffect(Unit) {
+        // Refresh the GHT ssh shortcuts on every start so updates reach existing
+        // installs. File writes only; live SSH sessions are unaffected.
+        Userland.installedDistro(ctx)?.let { d ->
+            withContext(Dispatchers.IO) {
+                runCatching { SshShortcuts.install(Userland.rootfsDir(ctx, d)) }
+                    .onFailure { android.util.Log.w("PocketShell.Ssh", "Could not refresh ssh shortcuts", it) }
+            }
+        }
         // A recreated Activity must reattach to its live foreground-service PTYs.
         // Re-running setup here used to close every SSH connection on recreation.
         if (service.sessions.any { it.alive.value && it.mode == SessionMode.LINUX }) return@LaunchedEffect
