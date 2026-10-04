@@ -53,6 +53,8 @@ Acceptance criteria:
   bound snapshot capture to 128 rows / 8,000 characters. Logging is sampled, bounded and local-only.
 - Remove plaintext credential fallback, migrate legacy values only after secure persistence,
   surface save errors and exclude credential-bearing app data from automatic backup/transfer.
+  Recovery preserves an unread key together with its provider address/model and retains
+  conflicting legacy values until the user can review them.
 - Add architecture, privacy, contribution and security documentation. This repository was
   already public and GPLv3; that does not by itself establish public-release readiness.
 
@@ -68,30 +70,36 @@ a 62,400-byte phrase containing accented text, Japanese and emoji; the receiver 
 | 100 warmed disabled-transcript flag checks | 5,686 ms | Under 1 ms |
 | Exact UTF-8 received | Yes, after blocking | Yes, without waiting for the slow reader |
 
-The same candidate measured 19 ms cold on the independent hosted runner, and 1 ms in a
-warmed development-host run. Different hosts and warm-up states are not interchangeable.
+The first candidate measured 19 ms cold on the independent hosted runner, and 1 ms in a
+warmed development-host run. Final production source `252d950` (0.5.3-rc.2) measured 17 ms
+cold on the hosted runner with exact UTF-8 delivery; 100 warmed flag checks remained under
+1 ms. Different hosts and warm-up states are not interchangeable.
 These numbers measure **app input handling**, not microphone-to-text recognition, network
 latency, PRoot overhead or physical-handset performance. No claim of a 23x faster recognizer.
 
 ## Verification
 
-- [Hosted CI for the candidate](https://github.com/glasshousetech/pocket-shell/actions/runs/37188997194):
+- [Hosted CI for the final production source](https://github.com/glasshousetech/pocket-shell/actions/runs/37190070045):
   lint passes (0 errors, 24 warnings), 172 unit tests pass with no skips/failures, and all 24
   instrumentation tests execute and pass. Artifacts contain timing logs, unit reports and UI images.
 - The real-PTY suite covers provisional edits, Unicode, Ctrl/Alt/Shift, Enter, bracketed paste,
   exactly-once composition, stale connections, keyboard-mode changes, queue overload/recovery,
   scrollback, alternate-screen/mouse behavior, activity recreation and ended-session handling.
 - Storage tests cover ordered save/clear, unavailable encrypted storage, blank/missing legacy
-  migration, conflicting legacy values and preserving an unread key during recovery.
+  migration, conflicting legacy values and preserving an unread key with its original
+  endpoint/model during recovery. An intentional subsequent blank save still clears it.
 - Workspace UI checks cover the reviewed editor and keyboard controls in portrait/landscape;
   the theme test applies all 20 themes and checks a narrow phone and wider foldable layout.
-- [Signed release build and upgrade test](https://github.com/glasshousetech/pocket-shell/actions/runs/37189236885):
+- [Signed release build and upgrade test](https://github.com/glasshousetech/pocket-shell/actions/runs/37190222053):
   install current public APK, prepare synthetic theme/private-file state, update in place,
   then verify retained state. Both preparation and verification pass. Play upload was skipped.
 - Downloaded APK independently verifies with apksigner. Package `network.ght.pocketshell`,
-  version `0.5.3-rc.1`, code `18`, min SDK 26, target SDK 34. Its certificate SHA-256 matches
+  version `0.5.3-rc.2`, code `19`, min SDK 26, target SDK 34. Its certificate SHA-256 matches
   0.5.1: `ceee0b987658c2d00bdeec4b61378abb99aee86e05e1d1ee78d4e4d55bdc1420`.
-- APK SHA-256: `36e92608a73293c06af45fe86a8c38b876919b2c8d657ba35b8c05f007823a27`.
+- APK SHA-256: `e48e879a14db5cf9af2ca869a1ba6aea9cde45e82107fbd85fc97c1140d6913d`.
+- Release tag `v0.5.3-rc.2` points to production source `252d950a25efc8e825b8e81fd66ab8fff164e299`.
+  Later evidence/architecture changes are documentation-only. The earlier 0.5.3-rc.1 draft
+  is superseded; do not install it instead of rc.2.
 - `scripts/verify-deploy.sh v0.5.1` confirms the unchanged stable download matches its GitHub
   asset: `ab692a671fb6d81a0d04e7906bfc9301b33a3f067367782470cbef0c02e4aaa3`.
 
@@ -102,8 +110,8 @@ latency, PRoot overhead or physical-handset performance. No claim of a 23x faste
   Earlier local theme-search timing failures were not fully diagnosed, although complete
   hosted runs passed. Keep this as a handset/regression-validation item, not a closed defect.
 - Accessibility can expose preview nodes before the compositor presents the frame. A test-only
-  follow-up waits for idle and two animation frames before capturing the preview. Production
-  sources and build configuration remain identical to release tag `v0.5.3-rc.1`.
+  follow-up waits for idle and two animation frames before capturing the preview. The final
+  production-source CI includes this wait; its portrait and landscape captures were inspected.
 - No reachable authorized phone: the saved SSH bridge refused connection; laptop ADB listed no
   device, and the two known phone network endpoints timed out/refused. No phone settings,
   permissions, app installation or active personal terminal was changed.
@@ -115,7 +123,7 @@ latency, PRoot overhead or physical-handset performance. No claim of a 23x faste
 
 ## Handoff
 
-Candidate is a signed **draft prerelease**, not a public/stable rollout. It is kept separate from
+Candidate `0.5.3-rc.2` is a signed **draft prerelease**, not a public/stable rollout. It is kept separate from
 the unmerged 0.5.2 tab-menu candidate. [Change review](https://github.com/glasshousetech/pocket-shell/pull/14).
 The stable download and updater remain on 0.5.1. No claim that the installed handset is fixed yet.
 Architecture and prioritized improvements: [ARCHITECTURE.md](ARCHITECTURE.md).

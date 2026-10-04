@@ -13,6 +13,8 @@
   Pocket Shell does not fall back to plaintext. Legacy plaintext values are migrated only
   after an encrypted write succeeds. Conflicting older values are retained with a warning
   until the user explicitly reviews and saves the encrypted configuration.
+  After temporarily unreadable storage recovers, a blank recovery form preserves the key,
+  provider address and model together; reopen Settings to review and change them.
 - Optional transcript logging is off by default and local-only. Logs are sampled and may
   include sensitive output. Session history and crash records are also local; their contents
   are not automatically uploaded. Crash records may include exception details.

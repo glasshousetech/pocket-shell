@@ -88,6 +88,11 @@ endpoint using the user's own API key. Terminal operation does not require an AI
 The returned suggestion can be reviewed, inserted or explicitly run. External model availability,
 network latency and provider charges are separate from terminal input performance.
 
+Settings saves use encrypted storage without a plaintext fallback. If that storage becomes
+temporarily unreadable, a subsequent blank recovery form preserves the entire saved key,
+endpoint and model configuration. It must not pair an unread existing key with the form's
+default endpoint. Reopen Settings after recovery to review or intentionally replace it.
+
 ## Improving the product from here
 
 | Priority | Improvement | Evidence required |
