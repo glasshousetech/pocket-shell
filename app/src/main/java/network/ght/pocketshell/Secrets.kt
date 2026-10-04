@@ -88,7 +88,7 @@ object Secrets {
     private fun readablePrefs(context: Context): SharedPreferences? {
         if (storageError != null) return null
         return runCatching { prefs(context) }.getOrElse {
-            storageError = "Android secure storage is unavailable. No key was saved in plaintext. Unlock and retry Save. A blank key preserves any unread stored key during recovery."
+            storageError = "Android secure storage is unavailable. No key was saved in plaintext. Unlock and retry Save. Without a replacement key, recovery keeps stored settings; reopen to edit them."
             null
         }
     }
@@ -134,8 +134,13 @@ object Secrets {
         val unreadableAtOpen = storageError != null && cachedPrefs == null
         runCatching {
             val secure = prefs(context)
-            val reviewedKey = if (unreadableAtOpen && key.isBlank()) secure.getString(KEY_API, "").orEmpty() else key.trim()
-            check(secure.edit().putString(KEY_API, reviewedKey).putString(KEY_MODEL, model)
+            if (unreadableAtOpen && key.isBlank()) {
+                // Recover the whole configuration, never pair an unread key with a default
+                // endpoint/model or retire conflicting legacy values the form could not show.
+                storageError = null
+                return@runCatching
+            }
+            check(secure.edit().putString(KEY_API, key.trim()).putString(KEY_MODEL, model)
                 .putString(KEY_BASE, base.trim().ifBlank { DEFAULT_BASE }).commit()) {
                 "Secure settings could not be saved."
             }

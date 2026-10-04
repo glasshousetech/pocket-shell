@@ -93,7 +93,9 @@ class StorageRegressionTest {
     }
 
     @Test fun recoveryDoesNotEraseAnUnreadKeyWithTheBlankFormDefault() {
-        assertTrue(Secrets.saveConfiguration(context, "synthetic-unread-key", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
+        assertTrue(Secrets.saveConfiguration(context, "synthetic-unread-key", "synthetic-private-model", "https://example.invalid").isSuccess)
+        val legacy = context.getSharedPreferences("pocketshell_secrets_plain", Context.MODE_PRIVATE)
+        assertTrue(legacy.edit().putString("anthropic_api_key", "synthetic-unreviewed-legacy-key").commit())
         resetSecureCache()
         val blocked = object : ContextWrapper(context) {
             override fun getApplicationContext(): Context = this
@@ -103,8 +105,13 @@ class StorageRegressionTest {
         assertEquals("", Secrets.apiKey(blocked))
         assertTrue(Secrets.saveConfiguration(context, "", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
         assertEquals("synthetic-unread-key", Secrets.apiKey(context))
+        assertEquals("synthetic-private-model", Secrets.model(context))
+        assertEquals("https://example.invalid", Secrets.baseUrl(context))
+        assertEquals("synthetic-unreviewed-legacy-key", legacy.getString("anthropic_api_key", null))
+        assertNotNull(Secrets.migrationNotice)
         // Once settings are readable, an intentional blank still clears the key normally.
         assertTrue(Secrets.saveConfiguration(context, "", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
         assertEquals("", Secrets.apiKey(context))
+        assertFalse(legacy.contains("anthropic_api_key"))
     }
 }
