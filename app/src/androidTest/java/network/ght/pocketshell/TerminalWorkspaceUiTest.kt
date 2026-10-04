@@ -52,6 +52,25 @@ class TerminalWorkspaceUiTest {
                     if (!ready) Thread.sleep(30)
                 }
                 assertTrue("Fixture shell is ready", ready)
+                lateinit var voiceInput: android.view.inputmethod.InputConnection
+                activity.onActivity { host ->
+                    fun terminal(view: android.view.View): network.ght.pocketshell.term.TerminalView? {
+                        if (view is network.ght.pocketshell.term.TerminalView) return view
+                        if (view is android.view.ViewGroup) for (i in 0 until view.childCount) {
+                            terminal(view.getChildAt(i))?.let { return it }
+                        }
+                        return null
+                    }
+                    voiceInput = terminal(host.window.decorView)!!.onCreateInputConnection(android.view.inputmethod.EditorInfo())
+                    voiceInput.setComposingText("Voice preview stays local until the keyboard commits it", 1)
+                }
+                assertTrue("Provisional speech is visible before commit",
+                    device.wait(Until.hasObject(By.textStartsWith("Composing: Voice preview")), 4000))
+                device.takeScreenshot(File(dir, "voice-composition-preview.png"))
+                instrumentation.runOnMainSync {
+                    assertFalse(fixture.session.emulator.screen.transcriptText.contains("Voice preview"))
+                    voiceInput.closeConnection()
+                }
                 // Close the terminal keyboard for a full-height workspace preview.
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                 device.waitForIdle()

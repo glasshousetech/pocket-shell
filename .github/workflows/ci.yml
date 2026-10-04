@@ -100,11 +100,12 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -r -w -e class network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb shell am instrument -r -w -e class network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
             mkdir -p app/build/outputs/theme-screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
             tar xf app/build/outputs/theme-screenshots.tar -C app/build/outputs/theme-screenshots
-            grep -q "OK (11 tests)" instrument-output.txt
+            grep -Eq 'OK \([1-9][0-9]* tests?\)' instrument-output.txt
+            ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE: -[234]' instrument-output.txt
 
       - name: Upload theme and terminal UI evidence
         if: always()

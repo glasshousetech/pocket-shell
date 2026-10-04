@@ -41,21 +41,26 @@ app and terminal themes. The goal is a terminal that feels like a native app, no
 | View glue | focus, pinch-zoom, modifier keys, clipboard | `TermView.kt` |
 | Session engine | PTY spawn + VT100/xterm emulation | `TermCore.kt` → Termux libs |
 
-The terminal engine is **Termux's** `terminal-view` / `terminal-emulator` libraries
-(prebuilt native PTY, all ABIs, pulled from JitPack). Pocket Shell wraps that proven core
-in its own UI rather than reimplementing a terminal emulator from scratch.
+The terminal engine is based on **Termux v0.118.0**, with its Java engine, native PTY
+bridge and regression tests built from vendored source. Pocket Shell adds an ordered,
+nonblocking input queue and a normal keyboard/voice composition path. See the complete
+[architecture and improvement roadmap](docs/ARCHITECTURE.md),
+[privacy behavior](PRIVACY.md), and [contribution guide](CONTRIBUTING.md).
 
 ## Build
 
-Everything builds in CI — no Android SDK/NDK needed locally to ship. To build yourself:
+CI builds the app with JDK 17 and pinned Android SDK/NDK tools. To build yourself:
 
 ```bash
-./gradlew :app:assembleDebug     # unsigned debug APK → app/build/outputs/apk/debug/
+./gradlew :app:assembleDebug     # debug-signed APK → app/build/outputs/apk/debug/
 ```
 
-- **CI** (`.github/workflows/ci.yml`) assembles the debug APK on every push and uploads it.
+- **CI** (`.github/workflows/ci.yml`) runs lint, unit tests and real-PTY/UI instrumentation
+  on master pushes and pull requests, and uploads the debug APK and UI evidence.
 - **Releases** (`.github/workflows/release.yml`) build a signed APK + AAB on a `v*` tag,
-  publish to GitHub Releases, and push to the Play Store internal track.
+  verify an in-place signed upgrade, and create a **draft** GitHub release. Stable
+  download promotion is a separate verified step. Non-RC releases can also upload
+  to the Play internal track when its optional credential is configured.
   Requires `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
   `ANDROID_KEY_PASSWORD` (and optional `PLAY_SERVICE_ACCOUNT_JSON`) as repo secrets.
 

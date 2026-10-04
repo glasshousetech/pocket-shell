@@ -7,8 +7,8 @@ import androidx.security.crypto.MasterKeys
 
 /**
  * Encrypted storage for the user's own Anthropic API key (BYO-key model — zero
- * GHT cost) and AI model choice. Falls back to plain prefs if the Android
- * keystore is unavailable so the app never crashes on exotic devices.
+ * GHT cost) and AI model choice. A keystore failure disables secure saving;
+ * credentials are never silently written to plaintext preferences.
  */
 object Secrets {
     private const val FILE = "pocketshell_secrets"
@@ -29,42 +29,104 @@ object Secrets {
         "claude-haiku-4-5" to "Haiku 4.5",
     )
 
-    private fun prefs(context: Context): SharedPreferences =
-        runCatching {
+    // Creating EncryptedSharedPreferences opens the keystore and decrypts its keysets.
+    // It is a process-level resource, not something to rebuild for every terminal redraw.
+    @Volatile private var cachedPrefs: SharedPreferences? = null
+    @Volatile private var cachedTranscriptLogging: Boolean? = null
+    @Volatile var storageError: String? = null
+        private set
+
+    private fun prefs(context: Context): SharedPreferences {
+        cachedPrefs?.let { return it }
+        return synchronized(this) {
+            cachedPrefs ?: createPrefs(context).also { cachedPrefs = it }
+        }
+    }
+
+    private fun createPrefs(context: Context): SharedPreferences {
             val alias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-            EncryptedSharedPreferences.create(
+            val secure = EncryptedSharedPreferences.create(
                 FILE,
                 alias,
                 context.applicationContext,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
             )
-        }.getOrElse {
-            context.applicationContext.getSharedPreferences("${FILE}_plain", Context.MODE_PRIVATE)
+            val legacy = context.getSharedPreferences("${FILE}_plain", Context.MODE_PRIVATE)
+            val fields = listOf(KEY_API, KEY_MODEL, KEY_BASE)
+            val editor = secure.edit()
+            fields.forEach { field ->
+                if (!secure.contains(field) && legacy.contains(field))
+                    editor.putString(field, legacy.getString(field, ""))
+            }
+            check(editor.commit()) { "Secure settings could not be saved." }
+            val regular = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            if (!regular.contains(KEY_TRANSCRIPTS)) {
+                val enabled = secure.getBoolean(KEY_TRANSCRIPTS, legacy.getBoolean(KEY_TRANSCRIPTS, false))
+                regular.edit().putBoolean(KEY_TRANSCRIPTS, enabled).apply()
+                cachedTranscriptLogging = enabled
+            }
+            // Retire the old plaintext values only after the encrypted write succeeds.
+            val cleanup = legacy.edit()
+            fields.forEach { cleanup.remove(it) }
+            cleanup.remove(KEY_TRANSCRIPTS).apply()
+            return secure
         }
 
-    fun apiKey(context: Context): String = prefs(context).getString(KEY_API, "").orEmpty()
+    private fun readablePrefs(context: Context): SharedPreferences? {
+        if (storageError != null) return null
+        return runCatching { prefs(context) }.getOrElse {
+            storageError = "Android secure storage is unavailable. No key was saved in plaintext. Unlock the device and retry Save."
+            null
+        }
+    }
+
+    fun apiKey(context: Context): String = readablePrefs(context)?.getString(KEY_API, "").orEmpty()
     fun hasApiKey(context: Context): Boolean = apiKey(context).isNotBlank()
     fun setApiKey(context: Context, value: String) {
         prefs(context).edit().putString(KEY_API, value.trim()).apply()
     }
 
     fun model(context: Context): String =
-        prefs(context).getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
+        readablePrefs(context)?.getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
     fun setModel(context: Context, value: String) {
         prefs(context).edit().putString(KEY_MODEL, value).apply()
     }
 
     fun baseUrl(context: Context): String =
-        prefs(context).getString(KEY_BASE, DEFAULT_BASE)?.ifBlank { DEFAULT_BASE } ?: DEFAULT_BASE
+        readablePrefs(context)?.getString(KEY_BASE, DEFAULT_BASE)?.ifBlank { DEFAULT_BASE } ?: DEFAULT_BASE
     fun setBaseUrl(context: Context, value: String) {
         prefs(context).edit().putString(KEY_BASE, value.trim().ifBlank { DEFAULT_BASE }).apply()
     }
 
     /** Off by default — transcripts can contain passwords/keys typed at the prompt. */
-    fun transcriptLoggingEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_TRANSCRIPTS, false)
+    fun transcriptLoggingEnabled(context: Context): Boolean {
+        cachedTranscriptLogging?.let { return it }
+        return synchronized(this) {
+            val regular = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            if (!regular.contains(KEY_TRANSCRIPTS)) readablePrefs(context)
+            cachedTranscriptLogging ?: regular.getBoolean(KEY_TRANSCRIPTS, false)
+                .also { cachedTranscriptLogging = it }
+        }
+    }
     fun setTranscriptLoggingEnabled(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_TRANSCRIPTS, value).apply()
+        synchronized(this) {
+            context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_TRANSCRIPTS, value).apply()
+            cachedTranscriptLogging = value
+        }
+    }
+
+    /** Call on IO. Failure keeps the editor open and the entered key recoverable. */
+    fun saveConfiguration(context: Context, key: String, model: String, base: String): Result<Unit> = synchronized(this) {
+        runCatching {
+            check(prefs(context).edit().putString(KEY_API, key.trim()).putString(KEY_MODEL, model)
+                .putString(KEY_BASE, base.trim().ifBlank { DEFAULT_BASE }).commit()) {
+                "Secure settings could not be saved."
+            }
+            storageError = null
+        }.onFailure {
+            storageError = "Could not securely save settings. Unlock the device and retry. Your entered key remains in this dialog."
+        }
     }
 }
