@@ -103,6 +103,10 @@ class ThemeWorkspaceUiTest {
                     openThemes()
                     device.findObject(By.clazz("android.widget.EditText")).text = theme.label
                     val card = device.wait(Until.findObject(By.desc("Apply theme ${theme.label}")), 4000)
+                    if (card == null) {
+                        capture("failed-search-${theme.id}")
+                        device.dumpWindowHierarchy(File(dir, "failed-search-${theme.id}.xml"))
+                    }
                     assertNotNull("Search reaches ${theme.label}", card)
                     card.click()
                     assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 4000))

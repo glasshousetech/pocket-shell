@@ -41,6 +41,12 @@ public interface TerminalViewClient {
      */
     boolean shouldAllowFullImeFeatures();
 
+    /** Uncommitted IME text for a local preview; never sent to the terminal or logged. */
+    default void onImeCompositionChanged(String text) {}
+
+    /** Optional bulk path. Return false when per-code-point key/modifier handling is required. */
+    default boolean onTextInput(CharSequence text, TerminalSession session) { return false; }
+
     boolean shouldUseCtrlSpaceWorkaround();
 
     boolean isTerminalViewSelected();

@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.Selection;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.ActionMode;
@@ -27,6 +28,8 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.autofill.AutofillValue;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Scroller;
@@ -58,6 +61,7 @@ public class TerminalView extends View {
     public TerminalRenderer mRenderer;
 
     public TerminalViewClient mClient;
+    private int mInputGeneration;
 
     private TextSelectionCursorController mTextSelectionCursorController;
 
@@ -236,6 +240,8 @@ public class TerminalView extends View {
      * already on screen, rather than only on the next one.
      */
     public void refreshImeConfiguration() {
+        mInputGeneration++;
+        mClient.onImeCompositionChanged("");
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.restartInput(this);
     }
@@ -258,6 +264,8 @@ public class TerminalView extends View {
      */
     public boolean attachSession(TerminalSession session) {
         if (session == mTermSession) return false;
+        mInputGeneration++;
+        mClient.onImeCompositionChanged("");
         mTopRow = 0;
 
         mTermSession = session;
@@ -330,60 +338,185 @@ public class TerminalView extends View {
         // is typed at a shell prompt — hostnames, tokens, passwords echoed by mistake — to its
         // personal dictionary and cloud sync. Opt out of that learning entirely.
         outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING;
+        outAttrs.initialSelStart = outAttrs.initialSelEnd = 0;
+        final TerminalSession inputSession = mTermSession;
+        final int inputGeneration = ++mInputGeneration;
+        mClient.onImeCompositionChanged("");
 
         return new BaseInputConnection(this, true) {
+            private int batchDepth;
+            private boolean selectionUpdatePosted;
+
+            private boolean isCurrent() {
+                return inputSession != null && inputSession == mTermSession
+                    && inputGeneration == mInputGeneration;
+            }
+
+            private void notifyIme() {
+                if (!isCurrent() || batchDepth != 0) return;
+                Editable content = getEditable();
+                mClient.onImeCompositionChanged(content.subSequence(Math.max(0, content.length() - 512), content.length()).toString());
+                if (!selectionUpdatePosted) {
+                    selectionUpdatePosted = true;
+                    post(() -> {
+                        selectionUpdatePosted = false;
+                        if (!isCurrent() || batchDepth != 0) return;
+                        Editable current = getEditable();
+                        InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+                        if (imm != null) imm.updateSelection(TerminalView.this,
+                            Selection.getSelectionStart(current), Selection.getSelectionEnd(current),
+                            getComposingSpanStart(current), getComposingSpanEnd(current));
+                    });
+                }
+            }
+
+            @Override public boolean beginBatchEdit() { batchDepth++; return true; }
+            @Override public boolean endBatchEdit() {
+                if (batchDepth > 0) batchDepth--;
+                notifyIme();
+                return batchDepth > 0;
+            }
+
+            @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
+                if (!isCurrent()) return false;
+                boolean result = super.setComposingText(text, newCursorPosition);
+                notifyIme();
+                return result;
+            }
+
+            @Override public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
+                if (!isCurrent()) return null;
+                ExtractedText result = new ExtractedText();
+                Editable content = getEditable();
+                result.text = content.toString();
+                result.startOffset = 0;
+                result.partialStartOffset = result.partialEndOffset = -1;
+                result.selectionStart = Selection.getSelectionStart(content);
+                result.selectionEnd = Selection.getSelectionEnd(content);
+                return result;
+            }
+
+            @Override public void closeConnection() {
+                // A closing editor must not submit provisional speech, especially after a tab switch.
+                if (isCurrent()) {
+                    mInputGeneration++;
+                    mClient.onImeCompositionChanged("");
+                }
+                getEditable().clear();
+                getEditable().clearSpans();
+                // Invalidate and clear first: BaseInputConnection closes composition too.
+                // Its finish callback must not submit a closing editor's draft.
+                super.closeConnection();
+            }
+
+            @Override public boolean sendKeyEvent(KeyEvent event) {
+                if (!isCurrent()) return false;
+                // Keep IME key events session-scoped instead of posting them to whichever
+                // Android editor happens to have focus when a later dispatch runs.
+                if (event.getAction() == KeyEvent.ACTION_DOWN)
+                    return TerminalView.this.onKeyDown(event.getKeyCode(), event);
+                if (event.getAction() == KeyEvent.ACTION_UP)
+                    return TerminalView.this.onKeyUp(event.getKeyCode(), event);
+                return false;
+            }
 
             @Override
             public boolean finishComposingText() {
+                if (!isCurrent()) return false;
                 if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
                 super.finishComposingText();
 
-                sendTextToTerminal(getEditable());
-                getEditable().clear();
-                return true;
+                boolean accepted = sendTextToTerminal(getEditable());
+                if (accepted) getEditable().clear();
+                notifyIme();
+                return accepted;
             }
 
             @Override
             public boolean commitText(CharSequence text, int newCursorPosition) {
+                if (!isCurrent()) return false;
                 if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
                     mClient.logInfo(LOG_TAG, "IME: commitText(\"" + text + "\", " + newCursorPosition + ")");
                 }
+                Editable existing = getEditable();
+                if (existing.length() == 0 || (getComposingSpanStart(existing) == 0
+                        && getComposingSpanEnd(existing) == existing.length())) {
+                    // This terminal consumes final text; building and immediately clearing a
+                    // large styled editor buffer is unnecessary for the ordinary commit case.
+                    boolean accepted = sendTextToTerminal(text);
+                    if (accepted) { existing.clear(); existing.clearSpans(); Selection.setSelection(existing, 0); }
+                    else super.commitText(text, newCursorPosition); // retain rejected text for recovery
+                    notifyIme();
+                    return accepted;
+                }
                 super.commitText(text, newCursorPosition);
 
-                if (mEmulator == null) return true;
+                if (mEmulator == null) return false;
 
                 Editable content = getEditable();
-                sendTextToTerminal(content);
-                content.clear();
-                return true;
+                boolean accepted = sendTextToTerminal(content);
+                if (accepted) content.clear();
+                notifyIme();
+                return accepted;
             }
 
             @Override
             public boolean deleteSurroundingText(int leftLength, int rightLength) {
+                if (!isCurrent() || leftLength < 0 || rightLength < 0) return false;
                 if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
                     mClient.logInfo(LOG_TAG, "IME: deleteSurroundingText(" + leftLength + ", " + rightLength + ")");
                 }
-                // The stock Samsung keyboard with 'Auto check spelling' enabled sends leftLength > 1.
-                KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
-                for (int i = 0; i < leftLength; i++) sendKeyEvent(deleteKey);
-                return super.deleteSurroundingText(leftLength, rightLength);
+                Editable content = getEditable();
+                int start = Math.max(0, Math.min(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+                int end = Math.max(start, Math.max(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+                int localLeft = Math.min(leftLength, start);
+                int localRight = Math.min(rightLength, content.length() - end);
+                // BaseInputConnection deliberately protects the composing span from
+                // deleteSurroundingText. A dictation correction must edit that local span.
+                if (localRight > 0) content.delete(end, end + localRight);
+                if (localLeft > 0) content.delete(start - localLeft, start);
+                // Provisional speech edits only its local buffer; committed text uses terminal keys.
+                for (int i = localLeft; i < leftLength; i++)
+                    TerminalView.this.onKeyDown(KeyEvent.KEYCODE_DEL, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
+                for (int i = localRight; i < rightLength; i++)
+                    TerminalView.this.onKeyDown(KeyEvent.KEYCODE_FORWARD_DEL, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL));
+                notifyIme();
+                return true;
             }
 
-            void sendTextToTerminal(CharSequence text) {
+            @Override public boolean deleteSurroundingTextInCodePoints(int left, int right) {
+                if (!isCurrent() || left < 0 || right < 0) return false;
+                Editable content = getEditable();
+                int start = Math.max(0, Math.min(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+                int end = Math.max(start, Math.max(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+                int localLeft = Math.min(left, Character.codePointCount(content, 0, start));
+                int localRight = Math.min(right, Character.codePointCount(content, end, content.length()));
+                return deleteSurroundingText(start - Character.offsetByCodePoints(content, start, -localLeft) + left - localLeft,
+                    Character.offsetByCodePoints(content, end, localRight) - end + right - localRight);
+            }
+
+            boolean sendTextToTerminal(CharSequence text) {
+                if (!isCurrent() || mEmulator == null) return false;
                 stopTextSelectionMode();
+                inputSession.beginInputBatch();
+                boolean accepted;
+                try {
                 final int textLengthInChars = text.length();
                 for (int i = 0; i < textLengthInChars; i++) {
+                    // Pocket Shell: encode ordinary dictation once. A one-shot modifier uses
+                    // the original first-code-point path, then the remainder can be batched.
+                    if (mClient.onTextInput(text.subSequence(i, textLengthInChars), inputSession)) break;
                     char firstChar = text.charAt(i);
                     int codePoint;
                     if (Character.isHighSurrogate(firstChar)) {
-                        if (++i < textLengthInChars) {
-                            codePoint = Character.toCodePoint(firstChar, text.charAt(i));
+                        if (i + 1 < textLengthInChars && Character.isLowSurrogate(text.charAt(i + 1))) {
+                            codePoint = Character.toCodePoint(firstChar, text.charAt(++i));
                         } else {
                             // At end of string, with no low surrogate following the high:
                             codePoint = TerminalEmulator.UNICODE_REPLACEMENT_CHAR;
                         }
                     } else {
-                        codePoint = firstChar;
+                        codePoint = Character.isLowSurrogate(firstChar) ? TerminalEmulator.UNICODE_REPLACEMENT_CHAR : firstChar;
                     }
 
                     // Check onKeyDown() for details.
@@ -423,6 +556,10 @@ public class TerminalView extends View {
 
                     inputCodePoint(codePoint, ctrlHeld, false);
                 }
+                } finally {
+                    accepted = inputSession.endInputBatch();
+                }
+                return accepted;
             }
 
         };
@@ -1209,7 +1346,8 @@ public class TerminalView extends View {
     }
 
     private boolean hideTextSelectionCursors() {
-        return getTextSelectionCursorController().hide();
+        // Do not inflate selection handles on the first keystroke just to hide nothing.
+        return mTextSelectionCursorController != null && mTextSelectionCursorController.hide();
     }
 
     private void renderTextSelection() {
@@ -1268,6 +1406,8 @@ public class TerminalView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
+        mInputGeneration++;
+        mClient.onImeCompositionChanged("");
         super.onDetachedFromWindow();
 
         if (mTextSelectionCursorController != null) {

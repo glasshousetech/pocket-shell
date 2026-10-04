@@ -15,15 +15,20 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "network.ght.pocketshell"
     compileSdk = 34
+    ndkVersion = "27.2.12479018"
     testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
 
     defaultConfig {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "0.5.1"
+        versionCode = 19
+        versionName = "0.5.3-rc.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
+        externalNativeBuild {
+            ndkBuild { cFlags += listOf("-std=c11", "-Wall", "-Wextra", "-Werror", "-Os") }
+        }
     }
 
     signingConfigs {
@@ -41,6 +46,8 @@ android {
         compose = true
         buildConfig = true
     }
+    externalNativeBuild { ndkBuild { path = file("src/main/jni/Android.mk") } }
+    testOptions { unitTests.isReturnDefaultValues = true }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
@@ -87,14 +94,9 @@ dependencies {
     // Encrypted storage for the user's Anthropic API key (AI copilot, BYO-key).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Real terminal engine: native PTY + VT100/xterm emulator. Prebuilt .so for
-    // all ABIs ships in the AAR — no NDK needed. GPLv3.
-    //
-    // The matching terminal-view module is NOT a dependency: its TerminalView is
-    // final and exposes no hook for the EditorInfo it hands the soft keyboard, so
-    // it is vendored into network.ght.pocketshell.term instead. See the README in
-    // that package for the provenance and the list of local changes.
-    implementation("com.termux.termux-app:terminal-emulator:0.118.0")
+    // Termux v0.118.0 engine + JNI are built from pinned, vendored source so the
+    // nonblocking input queue is shared by keyboard, paste and terminal replies.
+    // Provenance and local changes: third_party/termux/README.md.
     implementation("androidx.annotation:annotation:1.8.0")
 
     testImplementation("junit:junit:4.13.2")

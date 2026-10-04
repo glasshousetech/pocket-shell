@@ -10,12 +10,18 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.termux.terminal.TerminalSession
 import network.ght.pocketshell.term.TerminalView
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 /** Real PTY + pinned terminal engine, with controlled output and no personal sessions. */
 class TerminalInteractionTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context: Context get() = instrumentation.targetContext
+
+    @Before fun requireDisposableEmulator() {
+        org.junit.Assume.assumeTrue("Input fixtures require a disposable emulator",
+            android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+    }
 
     private fun terminal(command: String, block: (TerminalView, RailViewClient, TerminalSession) -> Unit) {
         lateinit var view: TerminalView
@@ -202,5 +208,86 @@ class TerminalInteractionTest {
         } finally {
             KeyboardPrefs.setFullImeFeatures(context, true)
         }
+    }
+
+    @Test fun provisionalVoiceTextIsVisibleAndCommittedExactlyOnce() = terminal(receiver(6)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.beginBatchEdit()
+            input.setComposingText("hello!", 1)
+            input.endBatchEdit()
+            assertEquals("hello!", client.composingText)
+            input.deleteSurroundingText(1, 0)
+            assertEquals("hello", client.composingText)
+            input.commitText("hello!", 1)
+            input.finishComposingText()
+            assertEquals("", client.composingText)
+        }
+        // If provisional deletion leaked to the shell, or composition was sent twice, this differs.
+        waitFor(session, "68 65 6c 6c 6f 21")
+    }
+
+    @Test fun staleImeCannotDeliverTextAfterConnectionReplacement() = terminal(receiver(3)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val stale = view.onCreateInputConnection(EditorInfo())
+            stale.setComposingText("DO_NOT_SEND", 1)
+            val current = view.onCreateInputConnection(EditorInfo())
+            assertFalse(stale.commitText("DO_NOT_SEND", 1))
+            stale.closeConnection()
+            current.setComposingText("ok", 1)
+            assertEquals("ok", client.composingText)
+            current.commitText("ok!", 1)
+        }
+        waitFor(session, "6f 6b 21")
+    }
+
+    @Test fun imePreservesStickyModifiersNewlinesAndMalformedUnicode() = terminal(receiver(10)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            client.toggleCtrl()
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.commitText("bx\n\uD800a\uDC00", 1)
+            assertFalse(client.ctrlDown)
+        }
+        waitFor(session, "02 78 0d ef bf bd 61 ef bf bd")
+    }
+
+    @Test fun reviewedPasteKeepsBracketedPasteAtomicAndDoesNotSubmit() = terminal(receiver(19)) { _, _, session ->
+        instrumentation.runOnMainSync {
+            val enable = "\u001b[?2004h".toByteArray()
+            session.emulator.append(enable, enable.size)
+            assertTrue(session.tryPaste(TerminalInteraction.reviewedText("one\ntwo")))
+        }
+        waitFor(session, "1b 5b 32 30 30 7e 6f 6e 65 20 74 77 6f 1b 5b 32")
+        waitFor(session, "30 31 7e")
+    }
+
+    @Test fun rejectedOversizedInputIsAtomicRetainsDraftAndAllowsRecovery() = terminal(receiver(3)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val oversized = "x".repeat(1024 * 1024 + 1)
+            val input = view.onCreateInputConnection(EditorInfo())
+            assertFalse(input.commitText(oversized, 1))
+            val extracted = input.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
+            assertEquals(oversized.length, extracted.text.length)
+            assertTrue(client.composingText.isNotEmpty())
+            assertFalse(session.tryPaste(oversized))
+            input.closeConnection()
+            assertFalse(input.commitText("NO", 1))
+            assertTrue(view.onCreateInputConnection(EditorInfo()).commitText("ok!", 1))
+        }
+        // No prefix from either rejected operation may arrive ahead of the recovery phrase.
+        waitFor(session, "6f 6b 21")
+    }
+
+    @Test fun keyboardModeChangeInvalidatesOldDictation() = terminal(receiver(3)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.setComposingText("DO_NOT_SEND", 1)
+            view.refreshImeConfiguration()
+            assertEquals("", client.composingText)
+            assertFalse(input.finishComposingText())
+            assertFalse(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)))
+            assertTrue(view.onCreateInputConnection(EditorInfo()).commitText("ok!", 1))
+        }
+        waitFor(session, "6f 6b 21")
     }
 }

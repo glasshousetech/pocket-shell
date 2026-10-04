@@ -46,7 +46,11 @@ object TermCore {
         onTitle: (TerminalSession) -> Unit,
         onFinished: (TerminalSession) -> Unit,
     ): TerminalSession {
-        val client = RailSessionClient(onRedraw, onTitle, onFinished)
+        val client = RailSessionClient(onRedraw, onTitle, onFinished) {
+            android.widget.Toast.makeText(context.applicationContext,
+                "Input could not be queued. The session has ended or is not reading input. Your reviewed draft is kept.",
+                android.widget.Toast.LENGTH_LONG).show()
+        }
         // A dedicated subdir, not the raw files dir root — the latter also holds
         // session-store JSON, caches, and extracted native libs, which made `ls`
         // in a fresh SYSTEM shell look like broken app internals instead of an
@@ -106,7 +110,10 @@ class RailSessionClient(
     private val onRedraw: (TerminalSession) -> Unit,
     private val onTitle: (TerminalSession) -> Unit,
     private val onFinished: (TerminalSession) -> Unit,
+    private val onInputRejected: () -> Unit = {},
 ) : TerminalSessionClient {
+
+    override fun onInputRejected(session: TerminalSession) = onInputRejected()
 
     override fun onTextChanged(session: TerminalSession) = onRedraw(session)
     override fun onTitleChanged(session: TerminalSession) = onTitle(session)

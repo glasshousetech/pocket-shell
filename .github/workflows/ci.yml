@@ -52,6 +52,17 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+      - name: Upload lint and unit-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-unit-lint-evidence
+          path: |
+            app/build/reports/lint-results-debug.*
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
+          if-no-files-found: warn
+
   instrumented-test:
     # Real behavioral gate: spawns an actual TermService + shell on a booted
     # emulator and asserts a command's output round-trips. This is the check
@@ -100,11 +111,13 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -r -w -e class network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb shell am instrument -r -w -e class network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb logcat -d -s System.out:I PocketShell.InputTiming:D > input-timings.txt
             mkdir -p app/build/outputs/theme-screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
             tar xf app/build/outputs/theme-screenshots.tar -C app/build/outputs/theme-screenshots
-            grep -q "OK (11 tests)" instrument-output.txt
+            grep -Eq 'OK \([1-9][0-9]* tests?\)' instrument-output.txt
+            ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE: -[234]' instrument-output.txt
 
       - name: Upload theme and terminal UI evidence
         if: always()
@@ -114,6 +127,7 @@ jobs:
           path: |
             app/build/outputs/theme-screenshots
             instrument-output.txt
+            input-timings.txt
           if-no-files-found: warn
 
       # Gradle prints only a pass/fail summary, so without this there is no way

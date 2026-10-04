@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -161,6 +162,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     // AI copilot state
     var copilotOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var settingsSaving by remember { mutableStateOf(false) }
+    var settingsSaveError by remember { mutableStateOf<String?>(null) }
     var aiInput by remember { mutableStateOf("") }
     var aiBusy by remember { mutableStateOf(false) }
     var aiResult by remember { mutableStateOf<String?>(null) }
@@ -357,7 +360,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     fun sendLiteral(ch: Char) { termViewRef.value?.inputCodePoint(if (viewClient.shiftDown) ch.uppercaseChar().code else ch.code, false, false) }
 
     fun terminalText(): String? =
-        runCatching { active.session.emulator?.screen?.transcriptText }.getOrNull()
+        runCatching { TerminalSnapshot.tail(active.session, maxChars = 4000) }.getOrNull()
 
     fun askAi(mode: AiCopilot.Mode) {
         if (!Secrets.hasApiKey(ctx)) { settingsOpen = true; return }
@@ -474,6 +477,16 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             )
         }
 
+        if (viewClient.composingText.isNotEmpty()) {
+            Text(
+                text = "Composing: ${viewClient.composingText}",
+                modifier = Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 8.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
         Row(
             Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -537,11 +550,12 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                 val text = TerminalInteraction.reviewedText(textDrafts[textTarget.id].orEmpty())
                 if (textTarget.alive.value && textTarget.session.emulator != null) {
                     viewClient.clearStickyModifiers()
-                    textTarget.session.emulator.paste(text)
-                    textDrafts.remove(textTarget.id)
-                    textInputSessionId = null
-                    termViewRef.value?.let(TerminalInteraction::followOutput)
-                    viewClient.showKeyboard()
+                    if (textTarget.session.tryPaste(text)) {
+                        textDrafts.remove(textTarget.id)
+                        textInputSessionId = null
+                        termViewRef.value?.let(TerminalInteraction::followOutput)
+                        viewClient.showKeyboard()
+                    }
                 } else {
                     textInputSessionId = null
                     setupError = "This session has ended. Reconnect before inserting text. Your draft is still in Text / voice for this tab."
@@ -557,12 +571,19 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             initialKey = Secrets.apiKey(ctx),
             initialModel = Secrets.model(ctx),
             initialBase = Secrets.baseUrl(ctx),
+            saveError = settingsSaveError ?: Secrets.storageError ?: Secrets.migrationNotice,
+            saving = settingsSaving,
             onSave = { key, model, base ->
-                Secrets.setApiKey(ctx, key)
-                Secrets.setModel(ctx, model)
-                Secrets.setBaseUrl(ctx, base)
-                settingsOpen = false
-                copilotOpen = true
+                settingsSaving = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { Secrets.saveConfiguration(ctx, key, model, base) }
+                    settingsSaving = false
+                    if (result.isSuccess) {
+                        settingsSaveError = null
+                        settingsOpen = false
+                        copilotOpen = true
+                    } else settingsSaveError = Secrets.storageError
+                }
             },
             onDismiss = { settingsOpen = false },
             // Re-negotiate the IME contract immediately so the keyboard on screen picks the
