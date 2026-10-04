@@ -56,15 +56,66 @@ Acceptance criteria:
 - Add architecture, privacy, contribution and security documentation. This repository was
   already public and GPLv3; that does not by itself establish public-release readiness.
 
-## Evidence
+## Measured results
 
-In progress: lint and unit tests pass on the isolated development host. API 34 AOSP tests
-verify composition, Unicode, modifiers, reviewed paste, stale connections, overload recovery
-and the real terminal UI. Warmed 62,400-byte commit: 1 ms, with receiver SHA-256 verification.
-Cold-start before/after and hosted CI are still being collected; do not treat the warmed result
-as handset dictation latency. An intermittent theme-search UI failure remains under investigation.
+Same development host, API 34 AOSP x86_64 image, 2 vCPUs / 2 GB emulator RAM. The test runs
+first in a fresh instrumentation process. A controlled raw PTY waits two seconds before reading
+a 62,400-byte phrase containing accented text, Japanese and emoji; the receiver verifies SHA-256.
 
-Candidate: 0.5.3-rc.1 / versionCode 18, kept separate from the unmerged 0.5.2 tab-menu candidate.
-No stable download, updater metadata or physical handset has been changed. Physical keyboard
-recognition and the live ARM64 Linux/SSH/tmux workflow remain separate acceptance gates from
-the Android input connection and controlled PTY tests. The visual preview awaits approval.
+| Measurement | Baseline `fc16f3f` | Candidate production source `4a7033f` |
+|---|---:|---:|
+| Main-thread final-phrase commit, cold | 2,304 ms | 100 ms |
+| 100 warmed disabled-transcript flag checks | 5,686 ms | Under 1 ms |
+| Exact UTF-8 received | Yes, after blocking | Yes, without waiting for the slow reader |
+
+The same candidate measured 19 ms cold on the independent hosted runner, and 1 ms in a
+warmed development-host run. Different hosts and warm-up states are not interchangeable.
+These numbers measure **app input handling**, not microphone-to-text recognition, network
+latency, PRoot overhead or physical-handset performance. No claim of a 23x faster recognizer.
+
+## Verification
+
+- [Hosted CI for the candidate](https://github.com/glasshousetech/pocket-shell/actions/runs/37188997194):
+  lint passes (0 errors, 24 warnings), 172 unit tests pass with no skips/failures, and all 24
+  instrumentation tests execute and pass. Artifacts contain timing logs, unit reports and UI images.
+- The real-PTY suite covers provisional edits, Unicode, Ctrl/Alt/Shift, Enter, bracketed paste,
+  exactly-once composition, stale connections, keyboard-mode changes, queue overload/recovery,
+  scrollback, alternate-screen/mouse behavior, activity recreation and ended-session handling.
+- Storage tests cover ordered save/clear, unavailable encrypted storage, blank/missing legacy
+  migration, conflicting legacy values and preserving an unread key during recovery.
+- Workspace UI checks cover the reviewed editor and keyboard controls in portrait/landscape;
+  the theme test applies all 20 themes and checks a narrow phone and wider foldable layout.
+- [Signed release build and upgrade test](https://github.com/glasshousetech/pocket-shell/actions/runs/37189236885):
+  install current public APK, prepare synthetic theme/private-file state, update in place,
+  then verify retained state. Both preparation and verification pass. Play upload was skipped.
+- Downloaded APK independently verifies with apksigner. Package `network.ght.pocketshell`,
+  version `0.5.3-rc.1`, code `18`, min SDK 26, target SDK 34. Its certificate SHA-256 matches
+  0.5.1: `ceee0b987658c2d00bdeec4b61378abb99aee86e05e1d1ee78d4e4d55bdc1420`.
+- APK SHA-256: `36e92608a73293c06af45fe86a8c38b876919b2c8d657ba35b8c05f007823a27`.
+- `scripts/verify-deploy.sh v0.5.1` confirms the unchanged stable download matches its GitHub
+  asset: `ab692a671fb6d81a0d04e7906bfc9301b33a3f067367782470cbef0c02e4aaa3`.
+
+## Test-environment limitations and open gates
+
+- Development-host UI runs intermittently hit **Android System UI isn't responding**;
+  captured UI hierarchy confirms the system dialog. Those runs are not passing app evidence.
+  Earlier local theme-search timing failures were not fully diagnosed, although complete
+  hosted runs passed. Keep this as a handset/regression-validation item, not a closed defect.
+- Accessibility can expose preview nodes before the compositor presents the frame. A test-only
+  follow-up waits for idle and two animation frames before capturing the preview. Production
+  sources and build configuration remain identical to release tag `v0.5.3-rc.1`.
+- No reachable authorized phone: the saved SSH bridge refused connection; laptop ADB listed no
+  device, and the two known phone network endpoints timed out/refused. No phone settings,
+  permissions, app installation or active personal terminal was changed.
+- Physical keyboard recognition and ARM64 Ubuntu/SSH/tmux, lock/unlock and network interruption
+  acceptance remain required by `docs/RUNTIME.md`. Simulated IME/Android PTY tests do not replace them.
+- The new composition-strip preview awaits maintainer approval before public visual promotion.
+- API 36/Play migration, 16-KB native compatibility, shared-storage policy, wake-lock behavior
+  and complete corresponding-source provenance for the bundled PRoot binaries remain public-launch work.
+
+## Handoff
+
+Candidate is a signed **draft prerelease**, not a public/stable rollout. It is kept separate from
+the unmerged 0.5.2 tab-menu candidate. [Change review](https://github.com/glasshousetech/pocket-shell/pull/14).
+The stable download and updater remain on 0.5.1. No claim that the installed handset is fixed yet.
+Architecture and prioritized improvements: [ARCHITECTURE.md](ARCHITECTURE.md).

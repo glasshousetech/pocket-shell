@@ -101,4 +101,15 @@ network latency and provider charges are separate from terminal input performanc
 | Speech responsiveness | Test recognizer-specific partial-result cadence; consider an opt-in on-device recognizer only if measurements justify it | Accuracy, language coverage, audio privacy, battery and first-partial latency |
 | Maintainability | Refresh the pinned Termux/Compose dependencies through measured upgrades | Upstream tests plus Pocket Shell's IME, PTY, persistence and UI suite |
 
+The current candidate still targets API 34. Google currently requires API 36 for new phone
+apps and updates submitted to Play; also validate native dependencies on 16-KB page-size
+devices. These are separate migration projects, not a claim that changing targetSdk makes
+PRoot compatible. Sources: [Play target requirements](https://developer.android.com/google/play/requirements/target-sdk)
+and [native page-size support](https://developer.android.com/guide/practices/page-sizes).
+
+For a broader public audience, make personal SSH hosts the primary setup path and keep GHT
+machine shortcuts optional. The app itself has no GHT account/signup requirement; SSH server
+authentication and the optional AI provider key are separate. Consider a measured lightweight
+SSH-first setup so users who only need remote access need not install the full developer toolkit.
+
 Current performance evidence and release state: [input-performance-20261004.md](input-performance-20261004.md).

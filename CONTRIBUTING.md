@@ -12,7 +12,8 @@ source; JitPack is not required. Disk space is also needed for Android's tools a
 
 ```sh
 ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
-./gradlew :app:connectedDebugAndroidTest
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest
 ```
 
 Use an isolated emulator. Test fixtures create shell sessions and synthetic application
@@ -20,6 +21,11 @@ state; never point them at a real user's active terminal. The upstream terminal-
 tests run alongside Pocket Shell unit tests. CI runs an explicit instrumentation suite and
 uploads UI evidence. Some provisioning tests require a real ARM64 device; emulator success
 does not prove that workflow.
+
+Keep the class filter: the separate signed-upgrade fixture requires an old-APK preparation
+phase, and ARM64 provisioning fixtures have different prerequisites. For screenshot capture,
+use the explicit install/instrument/pull sequence in `.github/workflows/ci.yml`; Gradle's
+connected-test task removes the test app after its run.
 
 For input changes, cover Unicode, provisional edits, final commits, exactly-once delivery,
 slow readers, closed sessions, tab switches, Ctrl/Alt/Shift, bracketed paste and long history.
