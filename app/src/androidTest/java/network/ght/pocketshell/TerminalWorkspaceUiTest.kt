@@ -66,7 +66,17 @@ class TerminalWorkspaceUiTest {
                 }
                 assertTrue("Provisional speech is visible before commit",
                     device.wait(Until.hasObject(By.textStartsWith("Composing: Voice preview")), 4000))
-                device.takeScreenshot(File(dir, "voice-composition-preview.png"))
+                // Accessibility nodes can arrive before the compositor presents the frame.
+                // Do not archive a black transitional surface as visual evidence.
+                device.waitForIdle()
+                val drawn = java.util.concurrent.CountDownLatch(1)
+                activity.onActivity { host ->
+                    host.window.decorView.postOnAnimation {
+                        host.window.decorView.postOnAnimation { drawn.countDown() }
+                    }
+                }
+                assertTrue("Preview frame presented", drawn.await(2, java.util.concurrent.TimeUnit.SECONDS))
+                assertTrue(device.takeScreenshot(File(dir, "voice-composition-preview.png")))
                 instrumentation.runOnMainSync {
                     assertFalse(fixture.session.emulator.screen.transcriptText.contains("Voice preview"))
                     voiceInput.closeConnection()
