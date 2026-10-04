@@ -11,7 +11,8 @@
   secrets before using it. An API key is not needed for normal terminal use.
 - API keys use Android encrypted storage. If it is unavailable, saving fails visibly;
   Pocket Shell does not fall back to plaintext. Legacy plaintext values are migrated only
-  after an encrypted write succeeds.
+  after an encrypted write succeeds. Conflicting older values are retained with a warning
+  until the user explicitly reviews and saves the encrypted configuration.
 - Optional transcript logging is off by default and local-only. Logs are sampled and may
   include sensitive output. Session history and crash records are also local; their contents
   are not automatically uploaded. Crash records may include exception details.

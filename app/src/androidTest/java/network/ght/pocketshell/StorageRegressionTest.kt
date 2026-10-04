@@ -36,7 +36,7 @@ class StorageRegressionTest {
     }
 
     private fun resetSecureCache() {
-        listOf("cachedPrefs", "cachedTranscriptLogging", "storageError").forEach { name ->
+        listOf("cachedPrefs", "cachedTranscriptLogging", "storageError", "migrationNotice").forEach { name ->
             Secrets::class.java.getDeclaredField(name).apply { isAccessible = true }.set(null, null)
         }
     }
@@ -50,7 +50,8 @@ class StorageRegressionTest {
             androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
-        assertTrue(secure.edit().remove("anthropic_api_key").commit())
+        // An existing but blank secure value must not erase a usable legacy key.
+        assertTrue(secure.edit().putString("anthropic_api_key", "").commit())
         val legacy = context.getSharedPreferences("pocketshell_secrets_plain", Context.MODE_PRIVATE)
         assertTrue(legacy.edit().putString("anthropic_api_key", "synthetic-migration-key").commit())
         assertEquals("synthetic-migration-key", Secrets.apiKey(context))
@@ -59,6 +60,21 @@ class StorageRegressionTest {
         assertEquals("synthetic-migration-key", Secrets.apiKey(context))
         assertTrue(Secrets.saveConfiguration(context, "", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
         assertEquals(0, context.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP)
+    }
+
+    @Test fun conflictingLegacyKeyIsPreservedUntilExplicitSave() {
+        assertTrue(Secrets.saveConfiguration(context, "synthetic-secure-key", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
+        val legacy = context.getSharedPreferences("pocketshell_secrets_plain", Context.MODE_PRIVATE)
+        assertTrue(legacy.edit().putString("anthropic_api_key", "synthetic-conflicting-key").commit())
+        resetSecureCache()
+        assertEquals("synthetic-secure-key", Secrets.apiKey(context))
+        assertEquals("synthetic-conflicting-key", legacy.getString("anthropic_api_key", null))
+        assertNotNull(Secrets.migrationNotice)
+        assertTrue(Secrets.saveConfiguration(context, "synthetic-reviewed-key", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
+        assertFalse(legacy.contains("anthropic_api_key"))
+        assertNull(Secrets.migrationNotice)
+        assertEquals("synthetic-reviewed-key", Secrets.apiKey(context))
+        assertTrue(Secrets.saveConfiguration(context, "", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
     }
 
     @Test fun unavailableSecureStorageDoesNotFallBackToPlaintext() {
@@ -74,5 +90,21 @@ class StorageRegressionTest {
         assertFalse(context.getSharedPreferences("pocketshell_secrets_plain", Context.MODE_PRIVATE)
             .contains("anthropic_api_key"))
         resetSecureCache()
+    }
+
+    @Test fun recoveryDoesNotEraseAnUnreadKeyWithTheBlankFormDefault() {
+        assertTrue(Secrets.saveConfiguration(context, "synthetic-unread-key", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
+        resetSecureCache()
+        val blocked = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                throw IllegalStateException("Synthetic locked keystore")
+        }
+        assertEquals("", Secrets.apiKey(blocked))
+        assertTrue(Secrets.saveConfiguration(context, "", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
+        assertEquals("synthetic-unread-key", Secrets.apiKey(context))
+        // Once settings are readable, an intentional blank still clears the key normally.
+        assertTrue(Secrets.saveConfiguration(context, "", Secrets.DEFAULT_MODEL, Secrets.DEFAULT_BASE).isSuccess)
+        assertEquals("", Secrets.apiKey(context))
     }
 }

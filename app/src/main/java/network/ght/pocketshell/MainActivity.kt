@@ -571,7 +571,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             initialKey = Secrets.apiKey(ctx),
             initialModel = Secrets.model(ctx),
             initialBase = Secrets.baseUrl(ctx),
-            saveError = settingsSaveError ?: Secrets.storageError,
+            saveError = settingsSaveError ?: Secrets.storageError ?: Secrets.migrationNotice,
             saving = settingsSaving,
             onSave = { key, model, base ->
                 settingsSaving = true

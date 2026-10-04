@@ -35,6 +35,8 @@ object Secrets {
     @Volatile private var cachedTranscriptLogging: Boolean? = null
     @Volatile var storageError: String? = null
         private set
+    @Volatile var migrationNotice: String? = null
+        private set
 
     private fun prefs(context: Context): SharedPreferences {
         cachedPrefs?.let { return it }
@@ -44,39 +46,49 @@ object Secrets {
     }
 
     private fun createPrefs(context: Context): SharedPreferences {
-            val alias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-            val secure = EncryptedSharedPreferences.create(
-                FILE,
-                alias,
-                context.applicationContext,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-            val legacy = context.getSharedPreferences("${FILE}_plain", Context.MODE_PRIVATE)
-            val fields = listOf(KEY_API, KEY_MODEL, KEY_BASE)
-            val editor = secure.edit()
-            fields.forEach { field ->
-                if (!secure.contains(field) && legacy.contains(field))
-                    editor.putString(field, legacy.getString(field, ""))
+        val alias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+        val secure = EncryptedSharedPreferences.create(
+            FILE,
+            alias,
+            context.applicationContext,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+        val legacy = context.getSharedPreferences("${FILE}_plain", Context.MODE_PRIVATE)
+        val editor = secure.edit()
+        val migrated = mutableListOf<String>()
+        var conflict = false
+        listOf(KEY_API, KEY_MODEL, KEY_BASE).forEach { field ->
+            if (legacy.contains(field)) {
+                val old = legacy.getString(field, "").orEmpty()
+                val encrypted = secure.getString(field, "").orEmpty()
+                if (encrypted.isBlank() || encrypted == old) {
+                    editor.putString(field, old)
+                    migrated.add(field)
+                } else conflict = true
             }
-            check(editor.commit()) { "Secure settings could not be saved." }
-            val regular = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-            if (!regular.contains(KEY_TRANSCRIPTS)) {
-                val enabled = secure.getBoolean(KEY_TRANSCRIPTS, legacy.getBoolean(KEY_TRANSCRIPTS, false))
-                regular.edit().putBoolean(KEY_TRANSCRIPTS, enabled).apply()
-                cachedTranscriptLogging = enabled
-            }
-            // Retire the old plaintext values only after the encrypted write succeeds.
-            val cleanup = legacy.edit()
-            fields.forEach { cleanup.remove(it) }
-            cleanup.remove(KEY_TRANSCRIPTS).apply()
-            return secure
         }
+        if (migrated.isNotEmpty()) check(editor.commit()) { "Secure settings could not be saved." }
+        val regular = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        if (!regular.contains(KEY_TRANSCRIPTS)) {
+            val enabled = secure.getBoolean(KEY_TRANSCRIPTS, legacy.getBoolean(KEY_TRANSCRIPTS, false))
+            regular.edit().putBoolean(KEY_TRANSCRIPTS, enabled).apply()
+            cachedTranscriptLogging = enabled
+        }
+        // Never silently overwrite an encrypted value or discard a different legacy value.
+        val cleanup = legacy.edit()
+        migrated.forEach { cleanup.remove(it) }
+        cleanup.remove(KEY_TRANSCRIPTS).apply()
+        migrationNotice = if (conflict)
+            "Older plaintext settings differ from encrypted settings. Encrypted settings remain active. Review and Save to retire the older values."
+        else null
+        return secure
+    }
 
     private fun readablePrefs(context: Context): SharedPreferences? {
         if (storageError != null) return null
         return runCatching { prefs(context) }.getOrElse {
-            storageError = "Android secure storage is unavailable. No key was saved in plaintext. Unlock the device and retry Save."
+            storageError = "Android secure storage is unavailable. No key was saved in plaintext. Unlock and retry Save. A blank key preserves any unread stored key during recovery."
             null
         }
     }
@@ -119,14 +131,23 @@ object Secrets {
 
     /** Call on IO. Failure keeps the editor open and the entered key recoverable. */
     fun saveConfiguration(context: Context, key: String, model: String, base: String): Result<Unit> = synchronized(this) {
+        val unreadableAtOpen = storageError != null && cachedPrefs == null
         runCatching {
-            check(prefs(context).edit().putString(KEY_API, key.trim()).putString(KEY_MODEL, model)
+            val secure = prefs(context)
+            val reviewedKey = if (unreadableAtOpen && key.isBlank()) secure.getString(KEY_API, "").orEmpty() else key.trim()
+            check(secure.edit().putString(KEY_API, reviewedKey).putString(KEY_MODEL, model)
                 .putString(KEY_BASE, base.trim().ifBlank { DEFAULT_BASE }).commit()) {
                 "Secure settings could not be saved."
             }
+            // An explicit successful Save resolves any legacy conflict in favor of the reviewed form.
+            check(context.getSharedPreferences("${FILE}_plain", Context.MODE_PRIVATE).edit()
+                .remove(KEY_API).remove(KEY_MODEL).remove(KEY_BASE).remove(KEY_TRANSCRIPTS).commit()) {
+                "Encrypted settings saved, but legacy settings could not be retired."
+            }
             storageError = null
+            migrationNotice = null
         }.onFailure {
-            storageError = "Could not securely save settings. Unlock the device and retry. Your entered key remains in this dialog."
+            storageError = "Could not finish saving and retiring old settings. Unlock the device and retry. Your entered key remains in this dialog."
         }
     }
 }
