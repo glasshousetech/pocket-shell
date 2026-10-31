@@ -1,5 +1,10 @@
 # Input performance and public-release readiness
 
+Current status, October 31: **0.5.3 is deployed** after Connor's explicit release request.
+The signed download, updater and catalog were read back successfully. **Fold7 installation,
+reload and physical-device acceptance remain pending** because its debugging transport is
+offline. The October 4 candidate results below are historical; see the final release receipt.
+
 ## Task brief
 
 Request: fix stalled/slow voice-to-text input, optimize the app's practical performance,
@@ -121,7 +126,7 @@ latency, PRoot overhead or physical-handset performance. No claim of a 23x faste
 - API 36/Play migration, 16-KB native compatibility, shared-storage policy, wake-lock behavior
   and complete corresponding-source provenance for the bundled PRoot binaries remain public-launch work.
 
-## Handoff
+## October 4 candidate handoff (superseded by the October 31 release)
 
 Candidate `0.5.3-rc.2` is a signed **draft prerelease**, not a public/stable rollout. It is kept separate from
 the unmerged 0.5.2 tab-menu candidate. [Change review](https://github.com/glasshousetech/pocket-shell/pull/14).
@@ -153,3 +158,54 @@ existing deleteSurroundingText path. The correction edits provisional code point
 or the selected range before forwarding a committed deletion. Added coverage also
 checks rapid mixed deletion APIs, forward-delete and stale-connection rejection.
 No terminal text is added to diagnostic logs; fixtures contain synthetic data only.
+
+## October 31 release receipt
+
+- Source/tag: `88ecf3b6fca347103d390726dc81cdda76c61814` / `v0.5.3`.
+  PR 14 merged as `c06a4fe68a9289767419c72fa8df085482c5b7dd`; its tree exactly
+  matches the tested tag. Subsequent receipt edits are documentation only.
+- [CI 41225723981](https://github.com/glasshousetech/pocket-shell/actions/runs/41225723981)
+  passed 172 unit tests (no skipped tests), all 27 Android instrumentation tests,
+  and lint with zero errors and 24 existing warnings. The previously failing backspace
+  test now passes, as do selected text, forward-delete, rapid deletion and stale-IME cases.
+- A 62,400-byte commit returned in **19 ms** while the controlled PTY reader slept;
+  the receiving UTF-8 hash matched. One hundred cached logging-preference checks took
+  less than one measured millisecond. These are emulator app-side timings, not handset
+  speech-recognition or end-to-end network latency.
+- [Signed release 41225720219](https://github.com/glasshousetech/pocket-shell/actions/runs/41225720219)
+  passed both update fixture phases (`OK (1 test)` each). Installing over published 0.5.1
+  preserved theme and synthetic private data. Play upload was skipped.
+- Current CI screenshots of provisional composition, keyboard-visible portrait and
+  landscape were inspected. The toolbar and text preview remained usable.
+- Package `network.ght.pocketshell`, version `0.5.3`, versionCode `20`, 8,588,419 bytes.
+  APK SHA-256: `0f9c6b8b0cee11b959954049c5d330cb02c9b12b870664981785b322981e846b`.
+  `apksigner verify` passed; certificate SHA-256 remains
+  `ceee0b987658c2d00bdeec4b61378abb99aee86e05e1d1ee78d4e4d55bdc1420`.
+- At 2026-10-31 17:49 UTC, independent public GETs verified the exact signed bytes at
+  both [stable download](https://dl.ght.network/pocketshell.apk) and
+  [versioned download](https://dl.ght.network/apps/pocketshell/0.5.3-0f9c6b8b0cee/pocketshell-0.5.3.apk).
+  `pocketshell-latest.json`, the Pocket Shell catalog entry and GitHub `/releases/latest`
+  agree on 0.5.3. `scripts/verify-deploy.sh v0.5.3` passed. Other catalog entries were
+  compared with their backup and preserved exactly.
+
+Deployment lesson: publishing the APK and metadata was insufficient for a **new versioned
+URL**. Caddy's software safety hold returned HTTP 503 with
+`X-GHT-Download-Status: locked-pending-safety-review`, while the stable URL already worked.
+Under Connor's explicit deployment authorization, the existing release allowlist gained
+only this exact versioned APK path. Caddy validation and graceful reload passed; the
+versioned URL then returned the expected bytes. The backup APK URL still returns the
+safety hold. Future releases must verify every advertised URL after the exact release
+path is authorized, not infer success from the stable URL or on-disk file.
+
+Rollback material: the previous stable APK is retained by the publisher as
+`pocketshell.apk.bak-previous`; catalog/manifest backups and the release receipt are in
+`/home/connor/reports/pocketshell-release-2026-10-31/`. The Caddy backup is
+`/etc/caddy/Caddyfile.bak-pocketshell-0.5.3-20261031`; revert only this release's narrow
+entry, never overwrite later unrelated configuration. Restoring a distribution file
+does not downgrade an already updated Android installation.
+
+Phone status: the verified laptop reconnect helper reported no physical phone, and both
+known phone debugging routes were unreachable. The signed APK was downloaded and hash
+verified on the laptop for a later in-place install. No handset installation, restart,
+RAM measurement, or real keyboard verification occurred. Fold7 acceptance, existing
+ARM64 Linux/SSH/tmux limitations, and the broader public-launch work remain open.
