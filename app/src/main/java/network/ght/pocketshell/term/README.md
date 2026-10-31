@@ -2,8 +2,8 @@
 
 These files are the `terminal-view` module of [Termux](https://github.com/termux/termux-app)
 at tag **v0.118.0**, copied in verbatim and then modified. Termux is GPLv3; so is Pocket Shell,
-so the fork is license-clean. The `terminal-emulator` module is still consumed as a published
-artifact (`com.termux.termux-app:terminal-emulator:0.118.0`) — only the *view* is vendored.
+and Pocket Shell distributes it under GPLv3. The matching terminal engine and JNI are also
+vendored and built from source. See `third_party/termux/README.md` for provenance and changes.
 
 ## Why it is vendored rather than depended on
 
@@ -14,7 +14,7 @@ no way to influence it from outside: you cannot subclass it, and a parent `ViewG
 
 ## Pocket Shell changes
 
-Every change is marked with a `Pocket Shell change` / `Pocket Shell addition` comment.
+The local changes are described here and in the repository history.
 
 1. **Package renamed** `com.termux.view` → `network.ght.pocketshell.term` (and `.textselection`),
    so the vendored classes do not collide with the published AAR if it is ever pulled back in.
@@ -25,10 +25,16 @@ Every change is marked with a `Pocket Shell change` / `Pocket Shell addition` co
    major keyboard (Microsoft SwiftKey, Gboard, Samsung) treat the terminal as a sensitive field
    and drop its whole toolbar row, which is where voice typing, the clipboard and emoji live.
    A plain text field with suggestions off keeps the row and still disables autocorrect.
-4. **`IME_FLAG_NO_PERSONALIZED_LEARNING`** is now always set, so a keyboard cannot add anything
-   typed at a shell prompt to its personal dictionary or sync it to a cloud profile.
+4. **`IME_FLAG_NO_PERSONALIZED_LEARNING`** is always set to ask the keyboard not to learn terminal
+   input. This is a request to the keyboard, not a guarantee about a third-party provider's behavior.
 5. **`TerminalView.refreshImeConfiguration()`** — restarts the IME connection so a change to the
    keyboard-mode setting applies to the keyboard already on screen.
+6. **Composition preview and deletion.** Provisional speech remains local and visible; corrections
+   edit that buffer before any committed-terminal deletion. Final text is committed once in bulk.
+7. **Connection generation.** Stale connections cannot deliver text after another connection,
+   tab attachment, detach or keyboard-mode change. Closing a connection discards its provisional text.
+8. **Nonblocking input.** Final phrases use the engine's bounded, atomic input batches. A rejected
+   IME commit keeps the local draft; reviewed paste reports failure and retains its editor text.
 
 ## Updating
 

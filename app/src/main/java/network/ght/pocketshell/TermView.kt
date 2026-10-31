@@ -82,6 +82,23 @@ class RailViewClient(
     var altDown by mutableStateOf(false)
     var shiftDown by mutableStateOf(false)
     var fnDown by mutableStateOf(false)
+    var composingText by mutableStateOf("")
+        private set
+
+    override fun onImeCompositionChanged(text: String) { composingText = text }
+
+    override fun onTextInput(text: CharSequence, session: TerminalSession): Boolean {
+        if (ctrlDown || altDown || shiftDown || fnDown) return false
+        val started = android.os.SystemClock.elapsedRealtimeNanos()
+        view?.let(TerminalInteraction::followOutput)
+        session.emulator?.setCursorBlinkState(true)
+        val normalized = ImeTextCodec.normalize(text)
+        val encoded = android.os.SystemClock.elapsedRealtimeNanos()
+        session.write(normalized)
+        if (BuildConfig.DEBUG && text.length > 1024) Log.d("PocketShell.InputTiming",
+            "chars=${text.length} normalizeUs=${(encoded - started) / 1000} writeUs=${(android.os.SystemClock.elapsedRealtimeNanos() - encoded) / 1000}")
+        return true
+    }
 
     fun clearStickyModifiers() {
         ctrlDown = false; altDown = false; shiftDown = false; fnDown = false

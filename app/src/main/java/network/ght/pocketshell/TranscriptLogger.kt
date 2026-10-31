@@ -1,111 +1,72 @@
 package network.ght.pocketshell
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.charset.StandardCharsets
 
-/**
- * Opt-in capture of a session's terminal transcript (commands + output, taken
- * from the emulator's own scrollback) so a session can be debugged after the
- * fact: written to a local rotating log file, and also batched to
- * POST /v1/pocketshell/transcripts on the configured gateway when a staff
- * proxy key is set and the endpoint isn't the default raw Anthropic one.
- *
- * Off by default (see [Secrets.transcriptLoggingEnabled]) — transcripts can
- * contain passwords, API keys, or other sensitive output typed at the prompt.
- * The log directory lives in [Context.getNoBackupFilesDir], same as
- * [SessionStore]'s scrollback snapshots, so it's excluded from Android's
- * cloud backup even while a user has logging turned on.
- *
- * TESTING ONLY: the gateway route this posts to is not live in production
- * yet, so uploads currently just fail silently — local logging still works
- * either way. Do not treat this as a working remote pipeline until confirmed.
- */
+/** Opt-in, local-only, sampled debug history. No network upload and no keystore work per redraw. */
 object TranscriptLogger {
     private const val MAX_LOG_BYTES = 512 * 1024
-    private val lastLength = mutableMapOf<Int, Int>()
-    private val seq = mutableMapOf<Int, Int>()
+    private val handler = Handler(Looper.getMainLooper())
+    private class Capture {
+        @Volatile var active = true
+        var pending: Runnable? = null
+        var previous = ""
+    }
+    private data class Entry(val context: Context, val id: Int, val capture: Capture, val text: String)
+    private val captures = mutableMapOf<Int, Capture>()
+    private val entries = Channel<Entry>(32, BufferOverflow.DROP_OLDEST)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private fun logDir(context: Context): File = File(context.noBackupFilesDir, "transcripts").apply { mkdirs() }
-    private fun logFile(context: Context, sessionId: Int): File = File(logDir(context), "session-$sessionId.log")
-
-    /** Call when a session is closed so a reused id starts a clean baseline. */
-    fun reset(sessionId: Int) {
-        lastLength.remove(sessionId)
-        seq.remove(sessionId)
-    }
-
-    /** Call on every TerminalSession redraw; appends only the newly-produced tail. */
-    fun onRedraw(context: Context, sessionId: Int, mode: SessionMode, session: TerminalSession) {
-        val appCtx = context.applicationContext
-        if (!Secrets.transcriptLoggingEnabled(appCtx)) return
+    init {
         scope.launch {
-            val text = runCatching { session.emulator?.screen?.transcriptText }.getOrNull() ?: return@launch
-            val prevLen = lastLength[sessionId] ?: 0
-            if (text.length <= prevLen) {
-                // Screen shrank (clear / scrollback trim) — rebaseline instead of
-                // re-sending the whole transcript from scratch.
-                lastLength[sessionId] = text.length
-                return@launch
-            }
-            val delta = text.substring(prevLen)
-            lastLength[sessionId] = text.length
-            if (delta.isBlank()) return@launch
-
-            appendLocal(appCtx, sessionId, delta)
-            uploadIfConfigured(appCtx, sessionId, mode, delta)
-        }
-    }
-
-    private fun appendLocal(context: Context, sessionId: Int, delta: String) {
-        runCatching {
-            val file = logFile(context, sessionId)
-            file.appendText(delta)
-            if (file.length() > MAX_LOG_BYTES) {
-                val tail = file.readText().takeLast(MAX_LOG_BYTES / 2)
-                file.writeText(tail)
+            for (entry in entries) {
+                if (!entry.capture.active || !Secrets.transcriptLoggingEnabled(entry.context)) continue
+                runCatching {
+                    val dir = File(entry.context.noBackupFilesDir, "transcripts").apply { mkdirs() }
+                    val file = File(dir, "session-${entry.id}.log")
+                    file.appendText(entry.text)
+                    if (file.length() > MAX_LOG_BYTES) file.writeText(file.readText().takeLast(64 * 1024))
+                }.onFailure {
+                    Log.w("PocketShell.Transcript", "Could not save local debug history (${it.javaClass.simpleName})")
+                }
             }
         }
     }
 
-    private fun uploadIfConfigured(context: Context, sessionId: Int, mode: SessionMode, delta: String) {
-        val key = Secrets.apiKey(context)
-        val base = Secrets.baseUrl(context)
-        // Only upload when pointed at a GHT gateway (not the default raw
-        // Anthropic endpoint) — that's what exposes the ingest route.
-        if (key.isBlank() || base.isBlank() || base.contains("api.anthropic.com")) return
-
-        val n = seq[sessionId] ?: 0
-        seq[sessionId] = n + 1
-
-        runCatching {
-            val url = URL(base.trimEnd('/') + "/v1/pocketshell/transcripts")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                connectTimeout = 10_000
-                readTimeout = 10_000
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("x-api-key", key)
-            }
-            val body = JSONObject()
-                .put("sessionId", sessionId.toString())
-                .put("mode", mode.name)
-                .put("seq", n)
-                .put("chunk", delta)
-                .toString()
-            conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
-            conn.responseCode // best-effort: drain to complete the request, failures are swallowed
-            conn.disconnect()
+    fun reset(sessionId: Int) {
+        captures.remove(sessionId)?.let {
+            it.active = false
+            it.pending?.let(handler::removeCallbacks)
         }
+    }
+
+    fun onRedraw(context: Context, sessionId: Int, mode: SessionMode, session: TerminalSession) {
+        if (!Secrets.transcriptLoggingEnabled(context)) { reset(sessionId); return }
+        val capture = captures.getOrPut(sessionId) { Capture() }
+        if (capture.pending != null) return
+        val appContext = context.applicationContext
+        val task = Runnable {
+            capture.pending = null
+            if (!capture.active || !Secrets.transcriptLoggingEnabled(appContext)) return@Runnable
+            // Read the mutable engine only on its main looper. Hand immutable text to IO.
+            val text = TerminalSnapshot.tail(session)
+            if (text == capture.previous) return@Runnable
+            val delta = if (text.startsWith(capture.previous)) text.substring(capture.previous.length)
+                else "\n--- sampled ${mode.name.lowercase()} screen ---\n$text"
+            capture.previous = text
+            if (delta.isNotBlank()) entries.trySend(Entry(appContext, sessionId, capture, delta))
+        }
+        capture.pending = task
+        handler.postDelayed(task, 1000)
     }
 }

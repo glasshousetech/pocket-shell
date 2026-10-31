@@ -52,6 +52,35 @@ class TerminalWorkspaceUiTest {
                     if (!ready) Thread.sleep(30)
                 }
                 assertTrue("Fixture shell is ready", ready)
+                lateinit var voiceInput: android.view.inputmethod.InputConnection
+                activity.onActivity { host ->
+                    fun terminal(view: android.view.View): network.ght.pocketshell.term.TerminalView? {
+                        if (view is network.ght.pocketshell.term.TerminalView) return view
+                        if (view is android.view.ViewGroup) for (i in 0 until view.childCount) {
+                            terminal(view.getChildAt(i))?.let { return it }
+                        }
+                        return null
+                    }
+                    voiceInput = terminal(host.window.decorView)!!.onCreateInputConnection(android.view.inputmethod.EditorInfo())
+                    voiceInput.setComposingText("Voice preview stays local until the keyboard commits it", 1)
+                }
+                assertTrue("Provisional speech is visible before commit",
+                    device.wait(Until.hasObject(By.textStartsWith("Composing: Voice preview")), 4000))
+                // Accessibility nodes can arrive before the compositor presents the frame.
+                // Do not archive a black transitional surface as visual evidence.
+                device.waitForIdle()
+                val drawn = java.util.concurrent.CountDownLatch(1)
+                activity.onActivity { host ->
+                    host.window.decorView.postOnAnimation {
+                        host.window.decorView.postOnAnimation { drawn.countDown() }
+                    }
+                }
+                assertTrue("Preview frame presented", drawn.await(2, java.util.concurrent.TimeUnit.SECONDS))
+                assertTrue(device.takeScreenshot(File(dir, "voice-composition-preview.png")))
+                instrumentation.runOnMainSync {
+                    assertFalse(fixture.session.emulator.screen.transcriptText.contains("Voice preview"))
+                    voiceInput.closeConnection()
+                }
                 // Close the terminal keyboard for a full-height workspace preview.
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                 device.waitForIdle()

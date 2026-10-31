@@ -206,7 +206,7 @@ class TermService : Service() {
                     null // proot's own -w /root always wins; host cwd isn't meaningful.
                 },
                 transcript = runCatching {
-                    holder.session.emulator?.screen?.transcriptText
+                    TerminalSnapshot.tail(holder.session)
                 }.getOrNull().orEmpty(),
             )
         }
@@ -226,6 +226,7 @@ class TermService : Service() {
         // accidental kill, so there's nothing to offer back on next launch.
         SessionStore.clear(this)
         sessions.forEach { runCatching { it.session.finishIfRunning() } }
+        sessions.forEach { TranscriptLogger.reset(it.id) }
         sessions.clear()
         releaseWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -305,6 +306,7 @@ class TermService : Service() {
     }
 
     override fun onDestroy() {
+        sessions.forEach { TranscriptLogger.reset(it.id) }
         snapshotHandler.removeCallbacks(snapshotTask)
         // Graceful stops (e.g. system shutdown) get one last save too; kills that
         // skip onDestroy entirely are exactly why the periodic timer exists.

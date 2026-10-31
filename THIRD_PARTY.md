@@ -3,9 +3,11 @@
 Pocket Shell bundles and downloads the following. Pocket Shell itself is GPLv3 (see `LICENSE`).
 
 ## Terminal engine — Termux
-`com.termux.termux-app:terminal-view` / `terminal-emulator` (JitPack, v0.118.0).
+Vendored `terminal-view` and `terminal-emulator` source, v0.118.0; JNI built with the pinned NDK.
 Native PTY + VT100/xterm emulator. **GPLv3** (underlying *Terminal Emulator for
 Android* code is Apache-2.0). Source: https://github.com/termux/termux-app
+
+Local changes and retained license: [third_party/termux](third_party/termux/README.md).
 
 ## proot — bundled native binaries
 `app/src/main/jniLibs/<abi>/libproot.so`, `libproot-loader.so`, `libproot-loader32.so`.

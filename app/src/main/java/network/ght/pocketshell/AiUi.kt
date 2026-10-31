@@ -136,6 +136,8 @@ fun SettingsDialog(
     onSave: (String, String, String) -> Unit,
     onDismiss: () -> Unit,
     onKeyboardModeChanged: () -> Unit = {},
+    saveError: String? = null,
+    saving: Boolean = false,
 ) {
     var key by remember { mutableStateOf(initialKey) }
     var model by remember { mutableStateOf(initialModel) }
@@ -174,6 +176,7 @@ fun SettingsDialog(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Pocket Shell Settings", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            if (saveError != null) Text(saveError, color = RailError, fontSize = 12.sp)
 
             Text("Appearance", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text("${LocalPocketTheme.current.label} · app and terminal", color = RailDimText, fontSize = 12.sp)
@@ -288,7 +291,7 @@ fun SettingsDialog(
                     colors = SwitchDefaults.colors(checkedTrackColor = RailAccent, checkedThumbColor = RailPromptText),
                 )
                 Text(
-                    "Save command + output history to this device for debugging. Off by default — a transcript can contain anything you typed, including passwords.",
+                    "Save sampled command + output history on this device only. Off by default. It may contain secrets and is not a complete audit log.",
                     color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
                 )
             }
@@ -342,7 +345,7 @@ fun SettingsDialog(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
                 TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
-                TextButton(onClick = { onSave(key, model, base) }) { Text("Save", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { onSave(key, model, base) }, enabled = !saving) { Text(if (saving) "Saving…" else "Save", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold) }
             }
         }
     }
