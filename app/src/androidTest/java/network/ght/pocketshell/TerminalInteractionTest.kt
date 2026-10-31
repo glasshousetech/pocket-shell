@@ -210,6 +210,39 @@ class TerminalInteractionTest {
         }
     }
 
+    @Test fun backspaceKeyEventsEditCompositionBeforeTerminal() = terminal(receiver(3)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.setComposingText("ab🚀", 1)
+            fun backspace() {
+                assertTrue(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL)))
+                assertTrue(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL)))
+            }
+            backspace()
+            assertEquals("One backspace removes one provisional code point", "ab", client.composingText)
+            backspace()
+            assertEquals("The next backspace also takes effect immediately", "a", client.composingText)
+            input.commitText("a", 1)
+            backspace()
+            input.commitText("z", 1)
+        }
+        // Provisional edits must not delete remote input; after commit exactly one DEL is sent.
+        waitFor(session, "61 7f 7a")
+    }
+
+    @Test fun rapidBackspacesDeliverOneDeletePerRequest() = terminal(receiver(7)) { view, _, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.commitText("abc", 1)
+            assertTrue(input.deleteSurroundingText(1, 0))
+            assertTrue(input.deleteSurroundingTextInCodePoints(1, 0))
+            assertTrue(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL)))
+            assertTrue(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL)))
+            input.commitText("z", 1)
+        }
+        waitFor(session, "61 62 63 7f 7f 7f 7a")
+    }
+
     @Test fun provisionalVoiceTextIsVisibleAndCommittedExactlyOnce() = terminal(receiver(6)) { view, client, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
