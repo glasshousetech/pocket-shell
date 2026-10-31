@@ -127,3 +127,29 @@ Candidate `0.5.3-rc.2` is a signed **draft prerelease**, not a public/stable rol
 the unmerged 0.5.2 tab-menu candidate. [Change review](https://github.com/glasshousetech/pocket-shell/pull/14).
 The stable download and updater remain on 0.5.1. No claim that the installed handset is fixed yet.
 Architecture and prioritized improvements: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+
+## October 31 release request and backspace report
+
+Connor explicitly requested deployment of these fixes and reload/update on his Fold7,
+then reported needing three backspace presses for one deletion. Release target: 0.5.3,
+versionCode 20. Preserve app-private data/signing identity and existing remote work.
+Phone update/reload is authorized; physical access and actual handset behavior still
+require direct verification. The earlier hold for maintainer approval is superseded
+by this deployment request; an unavailable handset must remain an explicit limitation.
+
+Add observable regression coverage for one deletion per call across IME key events,
+deleteSurroundingText and code-point deletion, including provisional composition and
+Unicode. Exercise the production signed upgrade and full existing Android suite before
+publishing. Verify GitHub latest, stable APK and versioned manifest agree. Never claim
+the phone was updated/reloaded from a public-download success alone.
+
+Backspace reproduction: CI 41225134976 at 9a9d038 executed 26 Android tests,
+with exactly one failure: `backspaceKeyEventsEditCompositionBeforeTerminal`
+expected `ab` after deleting from `ab🚀`, but the provisional text remained
+`ab🚀`. All 172 unit tests passed. Cause: IME `sendKeyEvent(KEYCODE_DEL)` went
+directly to the PTY instead of the provisional editable; this differs from the
+existing deleteSurroundingText path. The correction edits provisional code points
+or the selected range before forwarding a committed deletion. Added coverage also
+checks rapid mixed deletion APIs, forward-delete and stale-connection rejection.
+No terminal text is added to diagnostic logs; fixtures contain synthetic data only.

@@ -411,6 +411,27 @@ public class TerminalView extends View {
 
             @Override public boolean sendKeyEvent(KeyEvent event) {
                 if (!isCurrent()) return false;
+                int keyCode = event.getKeyCode();
+                Editable draft = getEditable();
+                if (event.getAction() == KeyEvent.ACTION_DOWN && draft.length() > 0
+                        && !event.isCtrlPressed() && !event.isAltPressed() && !event.isMetaPressed()
+                        && (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) {
+                    // IMEs may send delete as a key event instead of deleteSurroundingText.
+                    // Edit the same provisional buffer first; sending it straight to the
+                    // shell leaves the visible word unchanged and deletes unrelated input.
+                    int start = Selection.getSelectionStart(draft);
+                    int end = Selection.getSelectionEnd(draft);
+                    if (start >= 0 && end >= 0 && start != end) {
+                        int first = Math.min(start, end);
+                        draft.delete(first, Math.max(start, end));
+                        Selection.setSelection(draft, first);
+                        notifyIme();
+                        return true;
+                    }
+                    return keyCode == KeyEvent.KEYCODE_DEL
+                        ? deleteSurroundingTextInCodePoints(1, 0)
+                        : deleteSurroundingTextInCodePoints(0, 1);
+                }
                 // Keep IME key events session-scoped instead of posting them to whichever
                 // Android editor happens to have focus when a later dispatch runs.
                 if (event.getAction() == KeyEvent.ACTION_DOWN)

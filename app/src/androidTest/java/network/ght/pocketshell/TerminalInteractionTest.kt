@@ -243,6 +243,23 @@ class TerminalInteractionTest {
         waitFor(session, "61 62 63 7f 7f 7f 7a")
     }
 
+    @Test fun imeDeleteKeysHonorSelectionAndForwardDeletion() = terminal(receiver(1)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.setComposingText("abcd", 1)
+            assertTrue(input.setSelection(1, 3))
+            input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+            input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+            assertEquals("ad", client.composingText)
+            assertTrue(input.setSelection(0, 0))
+            input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL))
+            input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_FORWARD_DEL))
+            assertEquals("d", client.composingText)
+            input.commitText("d", 1)
+        }
+        waitFor(session, "64")
+    }
+
     @Test fun provisionalVoiceTextIsVisibleAndCommittedExactlyOnce() = terminal(receiver(6)) { view, client, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
@@ -266,6 +283,8 @@ class TerminalInteractionTest {
             stale.setComposingText("DO_NOT_SEND", 1)
             val current = view.onCreateInputConnection(EditorInfo())
             assertFalse(stale.commitText("DO_NOT_SEND", 1))
+            assertFalse(stale.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL)))
+            assertFalse(stale.deleteSurroundingText(1, 0))
             stale.closeConnection()
             current.setComposingText("ok", 1)
             assertEquals("ok", client.composingText)
