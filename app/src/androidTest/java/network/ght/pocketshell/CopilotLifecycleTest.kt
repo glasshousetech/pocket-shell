@@ -32,6 +32,10 @@ class CopilotLifecycleTest {
                 if (device.hasObject(By.text(text))) return true
                 Thread.sleep(50)
             } while (System.currentTimeMillis()<deadline)
+            val dir=java.io.File(ctx.filesDir,"screenshots").apply{mkdirs()}
+            val name="fresh-text-${text.hashCode()}"
+            device.takeScreenshot(java.io.File(dir,"$name.png"))
+            device.dumpWindowHierarchy(java.io.File(dir,"$name.xml"))
             return false
         }
         val service = (serviceRule.bindService(Intent(ctx,TermService::class.java)) as TermService.LocalBinder).service
@@ -74,11 +78,18 @@ class CopilotLifecycleTest {
                 }
                 assertTrue("User input is accepted before completing the pending provider fixture",inputAccepted)
                 response.complete(Result.success("printf COPILOT_REVIEW"))
-                assertTrue(device.wait(Until.hasObject(By.text("printf COPILOT_REVIEW")),8000))
+                val resultDeadline=System.currentTimeMillis()+8000
+                var resultAccepted=false
+                while (!resultAccepted && System.currentTimeMillis()<resultDeadline) {
+                    inst.runOnMainSync { resultAccepted = !service.copilot.busy.value && service.copilot.result.value == "printf COPILOT_REVIEW" }
+                    if (!resultAccepted) Thread.sleep(30)
+                }
+                assertTrue("Provider completion reaches retained service state",resultAccepted)
+                assertTrue("The completed suggestion is visible in a fresh accessibility tree",freshText("printf COPILOT_REVIEW"))
                 assertTrue(freshText("next unsent question"))
                 assertEquals(1,calls)
                 activity.recreate()
-                assertTrue(device.wait(Until.hasObject(By.text("printf COPILOT_REVIEW")),8000))
+                assertTrue("The completed suggestion is visible in a fresh accessibility tree",freshText("printf COPILOT_REVIEW"))
                 assertTrue(freshText("next unsent question"))
                 val shots=java.io.File(ctx.filesDir,"screenshots").apply{mkdirs()}
                 device.waitForIdle();device.takeScreenshot(java.io.File(shots,"copilot-result.png"))

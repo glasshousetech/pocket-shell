@@ -14,3 +14,9 @@ are uploaded alongside both upgrade phases. Independent-shell local validation
 read back22; the real signed upgrade remains the decisive release gate.
 
 Reference: https://github.com/ReactiveCircus/android-emulator-runner/blob/main/src/main.ts
+
+The workflow-only CI repeat passed42/43 but hit the same stale accessibility
+cache on the AI result read; the earlier correction refreshed only input reads.
+Apply the same fresh-node helper to result reads before/after recreation, and
+assert provider completion in retained state separately. Failure captures now
+cover every fresh-text lookup. No app-source or assertion requirement changed.
