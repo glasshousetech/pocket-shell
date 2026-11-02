@@ -23,6 +23,17 @@ class CopilotLifecycleTest {
         val inst = InstrumentationRegistry.getInstrumentation()
         val ctx = inst.targetContext
         val device = UiDevice.getInstance(inst)
+        // API34 may cache the pre-edit Compose accessibility node after recreation,
+        // even when the new text is rendered and retained in the service.
+        fun freshText(text: String): Boolean {
+            val deadline=System.currentTimeMillis()+8000
+            do {
+                if (android.os.Build.VERSION.SDK_INT>=34) inst.uiAutomation.clearCache()
+                if (device.hasObject(By.text(text))) return true
+                Thread.sleep(50)
+            } while (System.currentTimeMillis()<deadline)
+            return false
+        }
         val service = (serviceRule.bindService(Intent(ctx,TermService::class.java)) as TermService.LocalBinder).service
         val response = CompletableDeferred<Result<String>>()
         lateinit var origin: TermSession
@@ -47,8 +58,14 @@ class CopilotLifecycleTest {
                 assertTrue(device.wait(Until.hasObject(By.text("original request")),8000))
                 inst.runOnMainSync { assertTrue(service.copilot.busy.value); assertEquals(origin.id,service.copilot.originId.value) }
                 device.findObject(By.clazz("android.widget.EditText")).text = "next unsent question"
-                assertTrue("New input has reached the UI before the provider replies",
-                    device.wait(Until.hasObject(By.text("next unsent question")),8000))
+                val inputVisible = freshText("next unsent question")
+                if (!inputVisible) {
+                    val dir=java.io.File(ctx.filesDir,"screenshots").apply{mkdirs()}
+                    device.takeScreenshot(java.io.File(dir,"copilot-input-failure.png"))
+                    device.dumpWindowHierarchy(java.io.File(dir,"copilot-input-failure.xml"))
+                    inst.runOnMainSync { java.io.File(dir,"copilot-input-state.txt").writeText("input=${service.copilot.input.value} busy=${service.copilot.busy.value}") }
+                }
+                assertTrue("New input has reached the UI before the provider replies", inputVisible)
                 val inputDeadline = System.currentTimeMillis()+8000
                 var inputAccepted = false
                 while (!inputAccepted && System.currentTimeMillis()<inputDeadline) {
@@ -58,11 +75,11 @@ class CopilotLifecycleTest {
                 assertTrue("User input is accepted before completing the pending provider fixture",inputAccepted)
                 response.complete(Result.success("printf COPILOT_REVIEW"))
                 assertTrue(device.wait(Until.hasObject(By.text("printf COPILOT_REVIEW")),8000))
-                assertTrue(device.hasObject(By.text("next unsent question")))
+                assertTrue(freshText("next unsent question"))
                 assertEquals(1,calls)
                 activity.recreate()
                 assertTrue(device.wait(Until.hasObject(By.text("printf COPILOT_REVIEW")),8000))
-                assertTrue(device.hasObject(By.text("next unsent question")))
+                assertTrue(freshText("next unsent question"))
                 val shots=java.io.File(ctx.filesDir,"screenshots").apply{mkdirs()}
                 device.waitForIdle();device.takeScreenshot(java.io.File(shots,"copilot-result.png"))
                 fun reveal(text:String) {

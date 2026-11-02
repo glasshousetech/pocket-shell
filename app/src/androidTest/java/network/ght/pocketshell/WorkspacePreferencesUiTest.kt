@@ -53,12 +53,27 @@ class WorkspacePreferencesUiTest {
                 val before=columns()
                 find("⚙").click(); find("Appearance").click(); find("Larger").click()
                 assertEquals(14,WorkspacePrefs.fontSize(ctx))
-                waitFor { columns()<before }
+                // At mdpi, font hinting can give13sp and14sp the same glyph width.
+                // Two steps must resize the actual PTY grid, including at that density.
+                find("Larger").click()
+                assertEquals(15,WorkspacePrefs.fontSize(ctx))
+                try { waitFor { columns()<before } } catch (failure: Throwable) {
+                    device.takeScreenshot(File(shots,"font-update-failure.png"))
+                    device.dumpWindowHierarchy(File(shots,"font-update-failure.xml"))
+                    activity.onActivity { host ->
+                        val v=terminal(host.window.decorView)!!
+                        val field=v.javaClass.getDeclaredField("mRenderer").apply{isAccessible=true}
+                        val renderer=field.get(v)
+                        val size=renderer.javaClass.getDeclaredField("mTextSize").apply{isAccessible=true}.get(renderer)
+                        File(shots,"font-update-state.txt").writeText("before=$before after=${holder.session.emulator.mColumns} width=${v.width} height=${v.height} textSize=$size density=${ctx.resources.displayMetrics.scaledDensity} currentSession=${v.currentSession===holder.session} preference=${WorkspacePrefs.fontSize(ctx)}")
+                    }
+                    throw failure
+                }
                 device.takeScreenshot(File(shots,"settings-appearance.png"))
                 scroll("Close settings"); find("Close settings").click()
                 activity.recreate()
                 find("Text / voice")
-                assertEquals(14,WorkspacePrefs.fontSize(ctx))
+                assertEquals(15,WorkspacePrefs.fontSize(ctx))
                 waitFor { columns()<before }
                 find("⚙").click(); find("Sessions & privacy").click()
                 device.findObject(By.desc("Keep screen on")).click()

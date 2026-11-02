@@ -34,3 +34,13 @@ The terminal now converts the configured sp size without that unrelated clamp.
 The existing font/persistence UI regression remains unchanged. The controlled AI
 test now waits for the new user input to be accepted before completing its fake
 provider response; all post-response and recreation assertions remain intact.
+
+Direct mdpi reproduction additionally established two harness assumptions: Android
+API34 returned the old Compose accessibility text while the screenshot and
+service both contained the new input; the test now refreshes the documented
+UiAutomation cache before asserting the actual UI. Font hinting gave13sp/14sp
+the same glyph width (39columns), despite a confirmed14px renderer. The font
+regression now applies two increments, asserts15sp persistence and fewer actual
+PTY columns. Failure-only UI/state captures remain available. These changes
+retain the UI, lifecycle and real terminal-grid assertions.
+Reference: https://developer.android.com/reference/android/app/UiAutomation#clearCache()
