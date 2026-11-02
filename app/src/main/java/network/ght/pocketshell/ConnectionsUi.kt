@@ -33,28 +33,30 @@ data class SshProfile(
     /** Runs instead of tmux when set (the GHT machine hops). */
     val remoteCommand: String = "",
 ) {
-    fun command(): String {
-        val safeHost = host.trim().takeIf { it.matches(Regex("[A-Za-z0-9._:-]+")) }
+    fun command(tabId: String = TabIdentity.create()): String {
+        TabIdentity.requireValid(tabId)
+        val safeHost = host.trim().takeIf { !it.startsWith('-') && it.matches(Regex("[A-Za-z0-9._:-]+")) }
             ?: throw IllegalArgumentException("Enter a valid hostname or IP address.")
         val safeUser = user.trim().takeIf { it.isEmpty() || it.matches(Regex("[A-Za-z0-9._-]+")) }
             ?: throw IllegalArgumentException("Username contains unsupported characters.")
         val safePort = port.takeIf { it in 1..65535 }
             ?: throw IllegalArgumentException("Port must be between 1 and 65535.")
         val destination = if (safeUser.isEmpty()) safeHost else "$safeUser@$safeHost"
-        val base = "ssh -t -p $safePort -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes " +
+        val base = "ssh -t -p $safePort -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o SendEnv=GHT_TAB_ID " +
             "-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 " +
-            "-o ServerAliveCountMax=3 -o ConnectTimeout=15 $destination"
+            "-o ServerAliveCountMax=3 -o ConnectTimeout=15 -- $destination"
         val remote = remoteCommand.trim()
         if (remote.isNotEmpty()) {
             require(remote.matches(Regex("[A-Za-z0-9._/~ -]+"))) { "Remote command contains unsupported characters." }
-            return "$base '$remote'"
+            return "$base 'GHT_TAB_ID=$tabId $remote'"
         }
-        val session = tmuxSession.trim()
+        val prefix = tmuxSession.trim()
+        val session = if (prefix.isEmpty()) "" else "$prefix-$tabId"
         return if (session.isEmpty()) base else {
             require(session.matches(Regex("[A-Za-z0-9._-]+"))) { "tmux session contains unsupported characters." }
             // Mouse routing is session-scoped; do not alter other server sessions.
             // Quote the remote shell argument, and escape tmux's command separator.
-            "$base 'tmux new-session -A -s $session \\; set-option -t $session mouse on'"
+            "$base 'tmux new-session -A -s $session -e GHT_TAB_ID=$tabId \\; set-option -t =$session mouse on'"
         }
     }
 }
@@ -89,144 +91,5 @@ object SshProfiles {
             .putInt("port", profile.port)
             .putString("tmux", profile.tmuxSession)
             .apply()
-    }
-}
-
-@Composable
-fun ConnectionsDialog(
-    keyImportMessage: String?,
-    publicKey: String?,
-    onImportKey: () -> Unit,
-    onCopyPublicKey: () -> Unit,
-    onConnect: (SshProfile) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val ctx = LocalContext.current
-    val saved = remember { SshProfiles.custom(ctx) }
-    var name by remember { mutableStateOf(saved.name) }
-    var host by remember { mutableStateOf(saved.host) }
-    var user by remember { mutableStateOf(saved.user) }
-    var port by remember { mutableStateOf(saved.port.toString()) }
-    var tmux by remember { mutableStateOf(saved.tmuxSession) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var keyCopied by remember { mutableStateOf(false) }
-    val maxHeight = with(LocalConfiguration.current) { (screenHeightDp * .88f).dp }
-
-    // Built-in cards must not overwrite the user's saved server.
-    fun connect(profile: SshProfile, remember: Boolean = true) {
-        runCatching { profile.command() }
-            .onSuccess { if (remember) SshProfiles.save(ctx, profile); onConnect(profile) }
-            .onFailure { error = it.message }
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.clip(RoundedCornerShape(16.dp)).background(RailSurface)
-                .heightIn(max = maxHeight).verticalScroll(rememberScrollState()).padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Connect", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text(
-                "Jump into a persistent remote workspace. If your signal drops, reconnecting returns to the same tmux session and running agent.",
-                color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
-            )
-
-            ConnectionCard(SshProfiles.agentDroplet, "ssh agent.ght.network • tmux agents") {
-                connect(SshProfiles.agentDroplet, remember = false)
-            }
-
-            Text("GHT machines", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Text(
-                "Each hops through the agent droplet and stays in a droplet tmux session. Typed shortcuts work too, e.g. ssh alientop.ght.network.",
-                color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
-            )
-            SshShortcuts.machines.forEach { machine ->
-                ConnectionCard(SshShortcuts.profile(machine), "ssh ${machine.aliases.first()} • ${machine.detail}") {
-                    connect(SshShortcuts.profile(machine), remember = false)
-                }
-            }
-
-            Box(Modifier.fillMaxWidth().height(1.dp).background(RailKeyChip))
-            Text("Saved server", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            ProfileField("Name", name) { name = it }
-            ProfileField("Host", host) { host = it }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f)) { ProfileField("User (optional)", user) { user = it } }
-                Box(Modifier.width(88.dp)) { ProfileField("Port", port) { port = it.filter(Char::isDigit).take(5) } }
-            }
-            ProfileField("tmux session (blank to disable)", tmux) { tmux = it }
-
-            error?.let { Text(it, color = RailError, fontFamily = RailMono, fontSize = 11.sp) }
-            Text(
-                "Keys stay private inside Pocket Shell's Linux environment and are never copied to shared phone storage.",
-                color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
-            )
-            Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                    .background(if (publicKey != null) RailAccent.copy(alpha = .18f) else RailKeyChip)
-                    .clickable(enabled = publicKey != null) {
-                        onCopyPublicKey()
-                        keyCopied = true
-                    }.padding(11.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (publicKey != null) "Copy public key for server access" else "Preparing SSH identity…",
-                    color = if (publicKey != null) RailPromptText else RailDimText,
-                    fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 11.sp,
-                )
-            }
-            if (keyCopied) {
-                Text(
-                    "Public key copied. Add it to the server account, then tap Agent droplet.",
-                    color = RailAccent, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
-                )
-            }
-            Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(RailKeyChip)
-                    .clickable(onClick = onImportKey).padding(11.dp),
-                contentAlignment = Alignment.Center,
-            ) { Text("Import SSH private key", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
-            keyImportMessage?.let {
-                Text(it, color = if (it.startsWith("Key imported")) RailAccent else RailError, fontFamily = RailMono, fontSize = 10.sp)
-            }
-            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
-                TextButton(onClick = {
-                    connect(SshProfile(name.trim().ifEmpty { "My server" }, host, user, port.toIntOrNull() ?: 0, tmux))
-                }) { Text("Save & connect", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectionCard(profile: SshProfile, detail: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(RailKeyChip)
-            .clickable(onClick = onClick).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(profile.name, color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Text(detail, color = RailAccentDim, fontFamily = RailMono, fontSize = 10.sp)
-        }
-        Text("CONNECT ›", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun ProfileField(label: String, value: String, onValue: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(label, color = RailAccentDim, fontFamily = RailMono, fontSize = 10.sp)
-        TextField(
-            value = value, onValueChange = onValue, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = RailMono, fontSize = 12.sp, color = RailPromptText),
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = RailKeyChip, focusedContainerColor = RailKeyChip,
-                unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
-                cursorColor = RailAccent,
-            ),
-        )
     }
 }

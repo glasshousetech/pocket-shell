@@ -10,13 +10,19 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -32,12 +38,14 @@ import network.ght.pocketshell.ui.*
 /** The AI copilot bar: natural language -> command, or explain-last-output. */
 @Composable
 fun CopilotPanel(
+    modifier: Modifier = Modifier,
     input: String,
     onInput: (String) -> Unit,
     busy: Boolean,
     result: String?,
     error: String?,
     isCommand: Boolean,
+    originLabel: String?,
     onSend: () -> Unit,
     onExplain: () -> Unit,
     onInsert: (String) -> Unit,
@@ -45,14 +53,15 @@ fun CopilotPanel(
     onSettings: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(RailSurfaceAlt)
+            .verticalScroll(rememberScrollState())
             .padding(10.dp, 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Text("Includes up to 4,000 characters of recent terminal output.", color = RailDimText, fontSize = 11.sp)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("✨", fontSize = 15.sp)
             TextField(
                 value = input,
                 onValueChange = onInput,
@@ -70,7 +79,8 @@ fun CopilotPanel(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),
             )
-            AiChip("⚙", onSettings)
+            AiChip("Ask AI", onSend, enabled = !busy && input.isNotBlank(), accent = true)
+            AiChip("⚙", onSettings, Modifier.semantics { contentDescription = "AI settings" })
         }
 
         if (busy) {
@@ -86,6 +96,7 @@ fun CopilotPanel(
         }
 
         if (result != null) {
+            Text("Suggestion for ${originLabel ?: "a closed tab"}", color = RailDimText, fontSize = 12.sp)
             val scroll = rememberScrollState()
             Box(
                 modifier = Modifier
@@ -113,12 +124,13 @@ fun CopilotPanel(
 }
 
 @Composable
-private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, accent: Boolean = false) {
+private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, accent: Boolean = false, enabled: Boolean = true) {
     Box(
         modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(if (accent) RailAccent.copy(alpha = 0.22f) else RailKeyChip)
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -130,6 +142,10 @@ private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modi
 @Composable
 fun SettingsDialog(
     onThemes: () -> Unit,
+    onLinux: () -> Unit = {},
+    onKeys: () -> Unit = {},
+    onConnections: () -> Unit = {},
+    onWorkspacePreferencesChanged: () -> Unit = {},
     initialKey: String,
     initialModel: String,
     initialBase: String,
@@ -142,6 +158,7 @@ fun SettingsDialog(
     var key by remember { mutableStateOf(initialKey) }
     var model by remember { mutableStateOf(initialModel) }
     var base by remember { mutableStateOf(initialBase) }
+    var section by rememberSaveable { mutableStateOf<String?>(null) }
 
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -151,6 +168,18 @@ fun SettingsDialog(
     var lastCrash by remember { mutableStateOf(CrashHandler.lastCrash(ctx)) }
     var updateState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
     var storageGranted by remember { mutableStateOf(StorageAccess.isGranted(ctx)) }
+    var fontPoints by remember { mutableIntStateOf(WorkspacePrefs.fontSize(ctx)) }
+    var keepScreenOn by remember { mutableStateOf(WorkspacePrefs.keepScreenOn(ctx)) }
+    var backgroundWork by remember { mutableStateOf(WorkspacePrefs.backgroundWork(ctx)) }
+    var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) storageGranted = StorageAccess.isGranted(ctx)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun checkForUpdates() {
         updateState = UpdateCheckState.Checking
@@ -177,12 +206,38 @@ fun SettingsDialog(
         ) {
             Text("Pocket Shell Settings", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             if (saveError != null) Text(saveError, color = RailError, fontSize = 12.sp)
+            Text("Switches and appearance apply immediately. Save AI settings applies only to the AI fields.",
+                color = RailDimText, fontSize = 12.sp)
 
+            if (section == null) {
+                listOf("Appearance", "Keyboard", "Sessions & privacy", "Linux & connections", "AI Copilot", "Phone storage", "Updates", "Diagnostics").forEach { name ->
+                    OutlinedButton(onClick = { section = name }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(name) }
+                }
+            } else {
+                TextButton(onClick = { section = null }) { Text("‹ All settings") }
+            }
+            if (section == "Linux & connections") {
+                Text("Linux & connections", color = RailPromptText, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onConnections) { Text("Saved connections and SSH identity") }
+                TextButton(onClick = onLinux) { Text("Manage Linux") }
+            }
+            if (section == "Keyboard") {
+                TextButton(onClick = onKeys) { Text("Customize terminal keys") }
+            }
+            if (section == "Appearance") {
             Text("Appearance", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text("${LocalPocketTheme.current.label} · app and terminal", color = RailDimText, fontSize = 12.sp)
             TextButton(onClick = onThemes) { Text("Browse 20 themes") }
+            Text("Terminal size: $fontPoints sp", color = RailOutText)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(modifier = Modifier.weight(1f), enabled = fontPoints > 10, onClick = { fontPoints--; WorkspacePrefs.setFontSize(ctx,fontPoints); onWorkspacePreferencesChanged() }) { Text("Smaller") }
+                OutlinedButton(modifier = Modifier.weight(1f), enabled = fontPoints < 28, onClick = { fontPoints++; WorkspacePrefs.setFontSize(ctx,fontPoints); onWorkspacePreferencesChanged() }) { Text("Larger") }
+            }
+            Text("Pinch changes are saved too.", color = RailDimText)
             SettingsDivider()
 
+            }
+            if (section == "Phone storage") {
             Text("Phone storage", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text(
                 if (storageGranted) "Connected. Shared files are available in Linux at /sdcard."
@@ -197,6 +252,8 @@ fun SettingsDialog(
 
             SettingsDivider()
 
+            }
+            if (section == "AI Copilot") {
             Text("AI Copilot", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text(
                 "Bring your own Anthropic API key. Free to use — you pay Anthropic directly, nothing goes through Pocket Shell.",
@@ -255,9 +312,14 @@ fun SettingsDialog(
                 "Get a key at console.anthropic.com/settings/keys. Leave the endpoint as-is unless you're pointing at a GHT Halo proxy.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
             )
+            TextButton(onClick = { onSave(key, model, base) }, enabled = !saving) {
+                Text(if (saving) "Saving…" else "Save AI settings")
+            }
 
             SettingsDivider()
 
+            }
+            if (section == "Keyboard") {
             Text("Keyboard", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Switch(
@@ -280,6 +342,17 @@ fun SettingsDialog(
 
             SettingsDivider()
 
+            }
+            if (section == "Sessions & privacy") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(modifier = Modifier.semantics { contentDescription = "Keep screen on" }, checked = keepScreenOn, onCheckedChange = { keepScreenOn = it; WorkspacePrefs.setKeepScreenOn(ctx,it); onWorkspacePreferencesChanged() })
+                Text("Keep screen on while viewing the terminal", color = RailOutText)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(modifier = Modifier.semantics { contentDescription = "Keep CPU awake" }, checked = backgroundWork, onCheckedChange = { backgroundWork = it; WorkspacePrefs.setBackgroundWork(ctx,it); onWorkspacePreferencesChanged() })
+                Text("Keep CPU awake for live sessions", color = RailOutText)
+            }
+            Text("Keeping the CPU awake can use more battery. Turning it off lets Android suspend work; remote connections may disconnect. Ended tabs never hold the CPU awake.", color = RailDimText)
             Text("Session transcripts", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Switch(
@@ -298,6 +371,8 @@ fun SettingsDialog(
 
             SettingsDivider()
 
+            }
+            if (section == "Updates") {
             Text("Updates", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Text(
                 "Pocket Shell v${BuildConfig.VERSION_NAME}",
@@ -307,7 +382,10 @@ fun SettingsDialog(
                 is UpdateCheckState.Idle -> AiChip("Check for updates", { checkForUpdates() }, Modifier.fillMaxWidth())
                 is UpdateCheckState.Checking -> Text("Checking…", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
                 is UpdateCheckState.UpToDate -> Text("You're up to date.", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
-                is UpdateCheckState.Error -> Text("Couldn't check for updates — try again later.", color = RailError, fontFamily = RailMono, fontSize = 11.sp)
+                is UpdateCheckState.Error -> Column {
+                    Text("Couldn't check for updates. Your installed version is unchanged.", color = RailError, fontSize = 12.sp)
+                    TextButton(onClick = { checkForUpdates() }) { Text("Retry update check") }
+                }
                 is UpdateCheckState.Available -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("v${s.latestVersion} is available.", color = RailAccent, fontFamily = RailMono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     AiChip("Download v${s.latestVersion}", {
@@ -318,6 +396,8 @@ fun SettingsDialog(
                 }
             }
 
+            }
+            if (section == "Diagnostics") {
             if (lastCrash != null) {
                 SettingsDivider()
                 Text("Last crash", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -343,10 +423,22 @@ fun SettingsDialog(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
-                TextButton(onClick = onDismiss) { Text("Cancel", color = RailAccentDim, fontFamily = RailMono) }
-                TextButton(onClick = { onSave(key, model, base) }, enabled = !saving) { Text(if (saving) "Saving…" else "Save", color = RailAccent, fontFamily = RailMono, fontWeight = FontWeight.Bold) }
+            SettingsDivider()
+            Text("Diagnostics", color = RailPromptText, fontWeight = FontWeight.Bold)
+            Text("Local app events only. Terminal output, commands, keys and connection addresses are excluded.",
+                color = RailDimText, fontSize = 12.sp)
+            TextButton(onClick = {
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { runCatching { DiagnosticLog.read(ctx) } }
+                    result.onSuccess {
+                        if (it.isEmpty()) diagnosticsMessage = "No diagnostic events saved yet."
+                        else { clipboard.setText(AnnotatedString(it)); diagnosticsMessage = "Diagnostics copied." }
+                    }.onFailure { diagnosticsMessage = "Diagnostics could not be read. Retry after a moment." }
+                }
+            }) { Text("Copy diagnostics") }
+            (diagnosticsMessage ?: DiagnosticLog.storageError)?.let { Text(it, color = RailDimText, fontSize = 12.sp) }
             }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Close settings") }
         }
     }
 }

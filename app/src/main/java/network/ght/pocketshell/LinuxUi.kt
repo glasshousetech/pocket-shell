@@ -5,7 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,10 +86,11 @@ private fun DistroRow(distro: Distro, available: Boolean, recommended: Boolean, 
     }
 }
 
-/** Reached by long-pressing the 🐧 tab once a distro is installed: info + uninstall. */
+/** Explicit Linux maintenance entry in Settings. */
 @Composable
 fun LinuxManageDialog(
     distro: Distro?,
+    hasLinuxFiles: Boolean = distro != null,
     healthMessage: String?,
     healthBusy: Boolean,
     onCheck: () -> Unit,
@@ -94,11 +98,30 @@ fun LinuxManageDialog(
     onUninstall: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var confirmingRemoval by remember { mutableStateOf(false) }
+    var removalText by remember { mutableStateOf("") }
+    if (confirmingRemoval) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmingRemoval = false; removalText = "" },
+            title = { Text("Remove Linux and its files?") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("This immediately closes all tabs and permanently removes Linux files, packages and SSH keys. Shared phone files are kept. Back up anything you need first.")
+                androidx.compose.material3.OutlinedTextField(value = removalText, onValueChange = { removalText = it },
+                    label = { Text("Type REMOVE to confirm") }, singleLine = true)
+            } },
+            confirmButton = { TextButton(enabled = removalText == "REMOVE" && !healthBusy,
+                onClick = { confirmingRemoval = false; removalText = ""; onUninstall() }) { Text("Remove Linux") } },
+            dismissButton = { TextButton(onClick = { confirmingRemoval = false; removalText = "" }) { Text("Keep Linux") } },
+        )
+        return
+    }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .clip(RoundedCornerShape(14.dp))
                 .background(RailSurface)
+                .heightIn(max = (LocalConfiguration.current.screenHeightDp * .85f).dp)
+                .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -122,16 +145,16 @@ fun LinuxManageDialog(
                     }
                 }
                 Text(
-                    "Uninstalling removes the rootfs entirely and closes any open Linux tabs' data on next launch. You'll be able to pick a distro again from scratch.",
+                    "Removing Linux immediately closes all tabs and deletes Linux files, packages and SSH keys. Shared phone files are kept. Back up your Linux files first.",
                     color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
                 )
             } else {
-                Text("Nothing installed yet.", color = RailDimText, fontFamily = RailMono, fontSize = 12.sp)
+                Text(if (hasLinuxFiles) "Linux files remain from an incomplete installation or removal. You can remove them and set up again." else "Nothing installed yet.", color = RailDimText, fontFamily = RailMono, fontSize = 12.sp)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
                 TextButton(onClick = onDismiss) { Text("Close", color = RailAccentDim, fontFamily = RailMono) }
-                if (distro != null) {
-                    TextButton(onClick = onUninstall) {
+                if (hasLinuxFiles) {
+                    TextButton(enabled = !healthBusy, onClick = { confirmingRemoval = true }) {
                         Text("Uninstall", color = RailError, fontFamily = RailMono, fontWeight = FontWeight.Bold)
                     }
                 }

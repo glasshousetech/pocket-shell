@@ -65,13 +65,25 @@ jobs:
           script: |
             ./gradlew :app:assembleReleaseAndroidTest -PtestBuildType=release --no-daemon --stacktrace
             curl -fLsS https://dl.ght.network/pocketshell.apk -o previous-release.apk
+            EXPECTED_VERSION_CODE=$(sed -n 's/.*versionCode = \([0-9]\+\).*/\1/p' app/build.gradle.kts)
+            test -n "$EXPECTED_VERSION_CODE"
             adb install previous-release.apk
             adb install app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
-            adb shell am instrument -w -e class network.ght.pocketshell.ThemeUpgradeTest -e phase prepare network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-prepare.txt
+            adb shell am instrument -w -e class network.ght.pocketshell.ThemeUpgradeTest -e phase prepare -e expectedVersionCode "$EXPECTED_VERSION_CODE" network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-prepare.txt
             grep -q "OK (1 test)" upgrade-prepare.txt
             adb install -r app/build/outputs/apk/release/app-release.apk
-            adb shell am instrument -w -e class network.ght.pocketshell.ThemeUpgradeTest -e phase verify network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-verify.txt
+            adb shell am instrument -w -e class network.ght.pocketshell.ThemeUpgradeTest -e phase verify -e expectedVersionCode "$EXPECTED_VERSION_CODE" network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee upgrade-verify.txt
             grep -q "OK (1 test)" upgrade-verify.txt
+
+      - name: Retain signed-upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-signed-upgrade-evidence
+          path: |
+            upgrade-prepare.txt
+            upgrade-verify.txt
+          if-no-files-found: warn
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2

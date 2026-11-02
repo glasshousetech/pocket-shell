@@ -15,7 +15,7 @@ sealed class Distro(val id: String, val label: String, val dirName: String) {
     companion object {
         // Ubuntu is the daily-driver default: glibc and Debian packaging match
         // the supported environment expected by agent CLIs and most dev tools.
-        val ALL: List<Distro> = listOf(Ubuntu, Alpine)
+        val ALL: List<Distro> get() = listOf(Ubuntu, Alpine)
         fun byId(id: String): Distro? = ALL.firstOrNull { it.id == id }
     }
 }
@@ -180,9 +180,10 @@ object Userland {
     }
 
     /** argv that boots an interactive login shell inside [distro]'s rootfs. */
-    fun prootArgs(context: Context, distro: Distro, startupCommand: String? = null): Array<String> {
+    fun prootArgs(context: Context, distro: Distro, startupCommand: String? = null, tabId: String = TabIdentity.create()): Array<String> {
+        TabIdentity.requireValid(tabId)
         val shell = if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh"
-        return baseArgs(context, distro) + interactiveShellArgs(shell, startupCommand)
+        return baseArgs(context, distro) + arrayOf("GHT_TAB_ID=$tabId") + interactiveShellArgs(shell, startupCommand)
     }
 
     internal fun interactiveShellArgs(shell: String, startupCommand: String?): Array<String> =
@@ -194,7 +195,11 @@ object Userland {
         baseArgs(context, distro) + arrayOf("/bin/sh", "-c", command)
 
     /** Removes every installed distro's rootfs so the picker starts fresh. */
-    fun uninstall(context: Context) {
-        Distro.ALL.forEach { runCatching { rootfsDir(context, it).deleteRecursively() } }
-    }
+    fun uninstall(context: Context): Result<Unit> = runCatching {
+        synchronized(SshKeyStore.identityLock) {
+            DiagnosticLog.record(context, "linux", "removal_started")
+            Distro.ALL.forEach { check(rootfsDir(context, it).deleteRecursively()) { "Linux files remain." } }
+            DiagnosticLog.record(context, "linux", "removal_finished")
+        }
+    }.onFailure { DiagnosticLog.record(context, "linux", "removal_incomplete", it.javaClass.simpleName) }
 }

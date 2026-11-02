@@ -69,13 +69,18 @@ object Clip {
 class RailViewClient(
     private val context: Context,
     private val defaultFontPx: Int,
+    private val onFontChanged: (Int) -> Unit = {},
 ) : TerminalViewClient {
 
     var view: TerminalView? = null
 
     private var fontSizePx: Int = defaultFontPx
-    private val minFontPx = (defaultFontPx * 0.55f).roundToInt()
-    private val maxFontPx = (defaultFontPx * 2.2f).roundToInt()
+    private val minFontPx = (context.resources.displayMetrics.scaledDensity * 10).roundToInt()
+    private val maxFontPx = (context.resources.displayMetrics.scaledDensity * 28).roundToInt()
+
+    fun updateFontSize(pixels: Int) {
+        if (fontSizePx != pixels) { fontSizePx = pixels.coerceIn(minFontPx,maxFontPx); view?.setTextSize(fontSizePx) }
+    }
 
     /** Sticky modifiers toggled by the extra-keys row. Consumed after one key. */
     var ctrlDown by mutableStateOf(false)
@@ -183,6 +188,9 @@ class RailViewClient(
             if (newSize != fontSizePx) {
                 fontSizePx = newSize
                 view?.setTextSize(newSize)
+                val points = (newSize / context.resources.displayMetrics.scaledDensity).roundToInt().coerceIn(10,28)
+                WorkspacePrefs.setFontSize(context, points)
+                onFontChanged(points)
             }
             return 1.0f
         }

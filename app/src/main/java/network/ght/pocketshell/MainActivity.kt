@@ -22,12 +22,14 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.core.content.res.ResourcesCompat
 import network.ght.pocketshell.ui.*
 import com.termux.terminal.TerminalSession
@@ -51,17 +55,13 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val serviceState = mutableStateOf<TermService?>(null)
-    private val sshKeyImportMessage = mutableStateOf<String?>(null)
     private val sshKeyPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            sshKeyImportMessage.value = SshKeyStore.import(this, uri).fold(
-                onSuccess = { it }, onFailure = { "Key import failed: ${it.message}" },
-            )
-        }
+        if (uri != null) serviceState.value?.importSshKey(uri)
     }
 
     fun pickSshPrivateKey() {
-        sshKeyImportMessage.value = null
+        if (serviceState.value?.keyImportMessage?.value == "Validating SSH key…") return
+        serviceState.value?.keyImportMessage?.value = null
         sshKeyPicker.launch(arrayOf("application/octet-stream", "text/plain", "*/*"))
     }
 
@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DiagnosticLog.record(this, "workspace", if (savedInstanceState == null) "activity_opened" else "activity_recreated")
         Clip.init(this)
         requestNotificationPermission()
 
@@ -91,7 +92,7 @@ class MainActivity : ComponentActivity() {
                 Surface(color = RailBg) {
                     val service = serviceState.value
                     if (service == null) Splash() else PocketShellApp(
-                        service, sshKeyImportMessage.value, ::pickSshPrivateKey,
+                        service, service.keyImportMessage.value, ::pickSshPrivateKey,
                         onThemeChanged = { currentTheme = it },
                     )
                 }
@@ -122,7 +123,9 @@ private fun Splash() {
 private fun PocketShellApp(service: TermService, keyImportMessage: String?, onImportKey: () -> Unit, onThemeChanged: (TermTheme) -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
-    val fontPx = remember { with(density) { 13.sp.toPx() }.toInt().coerceAtLeast(18) }
+    var fontPoints by remember { mutableIntStateOf(WorkspacePrefs.fontSize(ctx)) }
+    var screenShouldStayOn by remember { mutableStateOf(WorkspacePrefs.keepScreenOn(ctx)) }
+    val fontPx = with(density) { fontPoints.sp.toPx() }.toInt().coerceAtLeast(18)
     val mono = remember {
         runCatching { ResourcesCompat.getFont(ctx, R.font.jbm_regular) }.getOrNull() ?: Typeface.MONOSPACE
     }
@@ -132,21 +135,22 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     // Sessions live in the foreground service (survive backgrounding).
     val sessions = service.sessions
-    var activeIndex by remember { mutableIntStateOf(0) }
+    var selectedSessionId by service.selectedSessionId
+    val activeIndex = sessions.indexOfFirst { it.id == selectedSessionId }.coerceAtLeast(0)
     // Phone terminals need ESC/TAB/CTRL/navigation constantly. Keep the row
     // visible by default; the handle still collapses it when screen space wins.
     var extraKeysOpen by remember { mutableStateOf(true) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
-    var textInputSessionId by remember { mutableStateOf<Int?>(null) }
-    val textDrafts = remember { mutableStateMapOf<Int, String>() }
+    var textInputSessionId by service.reviewedTextTarget
+    val textDrafts = service.reviewedTextDrafts
     // Persisted extra-keys layout (preset or customized); default is the
     // original hardcoded row, so nothing changes until the user picks one.
     var extraKeys by remember { mutableStateOf(ExtraKeysLayouts.saved(ctx)) }
     var keysDialogOpen by remember { mutableStateOf(false) }
 
     val termViewRef = remember { mutableStateOf<TerminalView?>(null) }
-    val viewClient = remember { RailViewClient(ctx, fontPx) }
+    val viewClient = remember { RailViewClient(ctx, fontPx) { fontPoints = it } }
     var terminalInAlternateBuffer by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var setupStatus by remember { mutableStateOf<String?>(null) }
@@ -156,19 +160,22 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     var linuxHealthMessage by remember { mutableStateOf<String?>(null) }
     var linuxHealthBusy by remember { mutableStateOf(false) }
     var themeOpen by remember { mutableStateOf(false) }
-    var connectionsOpen by remember { mutableStateOf(false) }
+    var connectionsOpen by rememberSaveable { mutableStateOf(false) }
     var publicKey by remember { mutableStateOf(SshKeyStore.publicKey(ctx).getOrNull()) }
 
     // AI copilot state
-    var copilotOpen by remember { mutableStateOf(false) }
-    var settingsOpen by remember { mutableStateOf(false) }
+    var copilotOpen by service.copilot.open
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var settingsSaving by remember { mutableStateOf(false) }
     var settingsSaveError by remember { mutableStateOf<String?>(null) }
-    var aiInput by remember { mutableStateOf("") }
-    var aiBusy by remember { mutableStateOf(false) }
-    var aiResult by remember { mutableStateOf<String?>(null) }
-    var aiError by remember { mutableStateOf<String?>(null) }
-    var aiIsCommand by remember { mutableStateOf(true) }
+    var aiInput by service.copilot.input
+    val aiBusy by service.copilot.busy
+    var aiResult by service.copilot.result
+    var aiError by service.copilot.error
+    val aiIsCommand by service.copilot.isCommand
+    val aiOriginId by service.copilot.originId
+    var closeTargetId by remember { mutableStateOf<Int?>(null) }
+    var renameSessionId by remember { mutableStateOf<Int?>(null) }
 
     // Repaint the visible terminal when its session's screen changes.
     DisposableEffect(service) {
@@ -186,7 +193,6 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         viewClient.clearStickyModifiers()
         ctrlMenuOpen = false
         altMenuOpen = false
-        textInputSessionId = null
     }
     LaunchedEffect(distroPickerOpen, connectionsOpen, settingsOpen, themeOpen, linuxManageOpen, keysDialogOpen) {
         if (distroPickerOpen || connectionsOpen || settingsOpen || themeOpen || linuxManageOpen || keysDialogOpen) {
@@ -201,7 +207,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             return
         }
         val holder = service.newSession(mode)
-        activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
+        selectedSessionId = holder.id
         termViewRef.value?.let {
             it.attachSession(holder.session)
             it.onScreenUpdated()
@@ -217,9 +223,9 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             else distroPickerOpen = true
             return
         }
-        activeIndex = activeIndex.coerceIn(0, sessions.size - 1)
+        val nextIndex = sessions.indexOfFirst { it.id == selectedSessionId }.coerceAtLeast(0)
         termViewRef.value?.let {
-            it.attachSession(sessions[activeIndex].session)
+            it.attachSession(sessions[nextIndex].session)
             it.onScreenUpdated()
         }
     }
@@ -256,12 +262,23 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     fun uninstallLinux() {
-        service.sessions.toList().forEach(service::closeSession)
-        Userland.uninstall(ctx)
-        activeIndex = 0
+        selectedSessionId = null
         publicKey = null
         linuxManageOpen = false
-        distroPickerOpen = true
+        setupStatus = "Removing Linux…"
+        service.removeLinux()
+    }
+
+    LaunchedEffect(service.linuxRemovalState.value) {
+        when (service.linuxRemovalState.value) {
+            TermService.RemovalState.RUNNING -> setupStatus = "Removing Linux…"
+            TermService.RemovalState.REMOVED -> { setupStatus = null; distroPickerOpen = true }
+            TermService.RemovalState.FAILED -> {
+                setupStatus = null
+                setupError = "Linux removal is incomplete. Some files remain. Open Settings → Manage Linux to retry."
+            }
+            TermService.RemovalState.IDLE -> Unit
+        }
     }
 
     fun setTheme(theme: TermTheme) {
@@ -272,6 +289,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     }
 
     LaunchedEffect(Unit) {
+        if (service.linuxRemovalState.value != TermService.RemovalState.IDLE) return@LaunchedEffect
         // Refresh the GHT ssh shortcuts on every start so updates reach existing
         // installs. File writes only; live SSH sessions are unaffected.
         Userland.installedDistro(ctx)?.let { d ->
@@ -280,9 +298,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     .onFailure { android.util.Log.w("PocketShell.Ssh", "Could not refresh ssh shortcuts", it) }
             }
         }
-        // A recreated Activity must reattach to its live foreground-service PTYs.
-        // Re-running setup here used to close every SSH connection on recreation.
-        if (service.sessions.any { it.alive.value && it.mode == SessionMode.LINUX }) return@LaunchedEffect
+        // A recreated Activity must reattach to its service-owned workspace,
+        // including ended tabs: their history, draft and reconnect state still matter.
+        // Treating an ended PTY as a fresh install closed the tab and discarded its draft.
+        if (service.sessions.any { it.mode == SessionMode.LINUX }) return@LaunchedEffect
         val distro = Userland.installedDistro(ctx)
         if (distro == null) {
             service.sessions.toList().forEach(service::closeSession)
@@ -319,9 +338,142 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         }
     }
 
+    fun connect(profile: SshProfile) {
+        connectionsOpen = false
+        if (Userland.installedDistro(ctx) == null) {
+            setupError = "Install Ubuntu first so Pocket Shell has a verified SSH client."
+            distroPickerOpen = true
+            return
+        }
+        // Start SSH as the PTY process's command. A fixed delay could type the
+        // command into an unready shell, or steal focus after a tab switch.
+        val tabId = TabIdentity.create()
+        val holder = service.newSession(SessionMode.LINUX, tabId = tabId, connectionProfile = profile)
+        holder.label.value = profile.name
+        selectedSessionId = holder.id
+        termViewRef.value?.let { view ->
+            view.attachSession(holder.session)
+            view.onScreenUpdated()
+            viewClient.showKeyboard()
+        }
+    }
+
+    if (settingsOpen) {
+        SettingsDialog(
+            onThemes = { settingsOpen = false; themeOpen = true },
+            onLinux = { settingsOpen = false; linuxManageOpen = true },
+            onKeys = { settingsOpen = false; keysDialogOpen = true },
+            onConnections = { settingsOpen = false; connectionsOpen = true },
+            onWorkspacePreferencesChanged = {
+                fontPoints = WorkspacePrefs.fontSize(ctx)
+                screenShouldStayOn = WorkspacePrefs.keepScreenOn(ctx)
+                service.refreshPowerPolicy()
+            },
+            initialKey = Secrets.apiKey(ctx),
+            initialModel = Secrets.model(ctx),
+            initialBase = Secrets.baseUrl(ctx),
+            saveError = settingsSaveError ?: Secrets.storageError ?: Secrets.migrationNotice,
+            saving = settingsSaving,
+            onSave = { key, model, base ->
+                settingsSaving = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { Secrets.saveConfiguration(ctx, key, model, base) }
+                    settingsSaving = false
+                    if (result.isSuccess) {
+                        settingsSaveError = null
+                        settingsOpen = false
+                        copilotOpen = true
+                    } else settingsSaveError = Secrets.storageError
+                }
+            },
+            onDismiss = { settingsOpen = false },
+            // Re-negotiate the IME contract immediately so the keyboard on screen picks the
+            // new mode up, instead of only the next one the user opens.
+            onKeyboardModeChanged = { viewClient.refreshIme() },
+        )
+    }
+
+    if (linuxManageOpen) {
+        LinuxManageDialog(
+            distro = Userland.installedDistro(ctx),
+            hasLinuxFiles = Distro.ALL.any { Userland.rootfsDir(ctx, it).exists() },
+            healthMessage = linuxHealthMessage,
+            healthBusy = linuxHealthBusy,
+            onCheck = {
+                linuxHealthBusy = true
+                linuxHealthMessage = "Testing the Linux toolchain…"
+                scope.launch {
+                    Bootstrap.healthCheck(ctx)
+                        .onSuccess { linuxHealthMessage = "Ready — ${it.lineSequence().firstOrNull().orEmpty()}" }
+                        .onFailure { linuxHealthMessage = "Self-test failed — ${it.message}" }
+                    linuxHealthBusy = false
+                }
+            },
+            onRepair = {
+                val distro = Userland.installedDistro(ctx)
+                if (distro == null) {
+                    linuxHealthMessage = "Linux is not installed."
+                } else {
+                    linuxHealthBusy = true
+                    linuxHealthMessage = "Repairing Linux…"
+                    scope.launch {
+                        Bootstrap.repair(ctx, distro) { msg ->
+                            scope.launch(Dispatchers.Main) { linuxHealthMessage = msg }
+                        }.onSuccess {
+                            publicKey = SshKeyStore.publicKey(ctx).getOrNull()
+                            linuxHealthMessage = "Ready — complete toolchain and SSH identity verified."
+                        }.onFailure { linuxHealthMessage = "Repair failed — ${it.message}" }
+                        linuxHealthBusy = false
+                    }
+                }
+            },
+            onUninstall = { uninstallLinux() },
+            onDismiss = { linuxManageOpen = false },
+        )
+    }
+
+    if (themeOpen) {
+        ThemePickerDialog(
+            currentId = currentTheme.id,
+            onPick = { setTheme(it) },
+            onDismiss = { themeOpen = false },
+        )
+    }
+
+    if (keysDialogOpen) {
+        ExtraKeysDialog(
+            current = extraKeys,
+            onPickPreset = { preset ->
+                ExtraKeysLayouts.savePreset(ctx, preset)
+                extraKeys = preset.keys
+            },
+            onChange = { keys ->
+                if (keys.isNotEmpty()) {
+                    ExtraKeysLayouts.saveCustom(ctx, keys)
+                    extraKeys = keys
+                }
+            },
+            onDismiss = { keysDialogOpen = false },
+        )
+    }
+
+    if (connectionsOpen) {
+        ConnectionLibraryDialog(
+            keyImportMessage = keyImportMessage,
+            publicKey = publicKey,
+            onImportKey = onImportKey,
+            onCopyPublicKey = {
+                publicKey?.let { Clip.copy(it) }
+            },
+            onConnect = { connect(it) },
+            onDismiss = { connectionsOpen = false },
+        )
+    }
+
     if (sessions.isEmpty()) {
         SetupHome(
             installed = Userland.installedDistro(ctx) != null,
+            onSettings = { settingsOpen = true },
             onSetup = { distroPickerOpen = true },
             onRepair = {
                 val distro = Userland.installedDistro(ctx) ?: return@SetupHome
@@ -345,8 +497,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         if (distroPickerOpen) {
             DistroPickerDialog(
                 onPick = { installDistro(it) },
-                onDismiss = {},
-                setupRequired = true,
+                onDismiss = { distroPickerOpen = false },
+                setupRequired = false,
             )
         }
         return
@@ -363,70 +515,76 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         runCatching { TerminalSnapshot.tail(active.session, maxChars = 4000) }.getOrNull()
 
     fun askAi(mode: AiCopilot.Mode) {
+        if (aiBusy) return
         if (!Secrets.hasApiKey(ctx)) { settingsOpen = true; return }
         val prompt = if (mode == AiCopilot.Mode.COMMAND) aiInput.trim()
             else "Explain the recent output and any error, and suggest a fix if applicable."
         if (mode == AiCopilot.Mode.COMMAND && prompt.isEmpty()) return
-        aiError = null; aiResult = null; aiBusy = true
-        aiIsCommand = mode == AiCopilot.Mode.COMMAND
-        val termText = terminalText()
-        scope.launch {
-            val res = AiCopilot.ask(ctx, prompt, termText, mode)
-            aiBusy = false
-            res.onSuccess { aiResult = it; if (aiIsCommand) aiInput = "" }
-                .onFailure { aiError = it.message ?: "Request failed." }
-        }
+        service.requestCopilot(active, prompt, terminalText(), mode)
     }
 
     fun insertToTerminal(cmd: String, run: Boolean) {
-        val text = cmd.trim()
-        active.session.write(if (run && !text.endsWith("\n")) "$text\n" else text)
+        val result = ReviewedCommand.insert(active, aiOriginId, cmd, run)
+        if (result.isFailure) {
+            aiError = result.exceptionOrNull()?.message
+            return
+        }
         aiResult = null
         copilotOpen = false
         termViewRef.value?.let { it.requestFocus(); viewClient.showKeyboard() }
     }
 
-    fun connect(profile: SshProfile) {
-        connectionsOpen = false
-        if (Userland.installedDistro(ctx) == null) {
-            setupError = "Install Ubuntu first so Pocket Shell has a verified SSH client."
-            distroPickerOpen = true
-            return
-        }
-        // Start SSH as the PTY process's command. A fixed delay could type the
-        // command into an unready shell, or steal focus after a tab switch.
-        val holder = service.newSession(SessionMode.LINUX, startupCommand = profile.command())
-        activeIndex = sessions.indexOf(holder).coerceAtLeast(0)
-        termViewRef.value?.let { view ->
-            view.attachSession(holder.session)
-            view.onScreenUpdated()
-            viewClient.showKeyboard()
-        }
+    fun showSession(holder: TermSession) {
+        selectedSessionId = holder.id
+        termViewRef.value?.let { it.attachSession(holder.session); it.onScreenUpdated() }
     }
+    fun tabAction(holder: TermSession, action: TabAction) {
+        if (holder !in sessions) return
+        runCatching {
+            when (action) {
+                TabAction.Rename -> renameSessionId = holder.id
+                is TabAction.SetColor -> service.setSessionColor(holder,action.colorId)
+                TabAction.Duplicate -> showSession(service.duplicateSession(holder))
+                TabAction.Restart -> service.restartSession(holder)?.let(::showSession)
+                TabAction.MoveLeft -> service.moveSession(holder,-1)
+                TabAction.MoveRight -> service.moveSession(holder,1)
+                TabAction.CopyOutput -> Clip.copy(TabOutput.forClipboard(holder.session.emulator?.screen?.transcriptText))
+                TabAction.ClearScrollback -> { holder.session.emulator?.screen?.clearTranscript(); termViewRef.value?.let(TerminalInteraction::redraw) }
+                TabAction.ResetTerminal -> { if (holder.session.emulator != null) holder.session.reset(); termViewRef.value?.let(TerminalInteraction::redraw) }
+                TabAction.CloseOthers -> { service.closeOtherSessions(holder); showSession(holder) }
+                TabAction.Close -> closeTargetId = holder.id
+            }
+        }.onFailure { setupError = it.message ?: "The tab action failed." }
+    }
+    val renameTarget = sessions.firstOrNull { it.id == renameSessionId }
+    if (renameTarget != null) RenameTabDialog(
+        customName = renameTarget.customName.value,
+        automaticTitle = renameTarget.label.value,
+        onSave = { service.renameSession(renameTarget,it); renameSessionId = null },
+        onDismiss = { renameSessionId = null },
+    )
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    val expandedWorkspace = LocalConfiguration.current.screenWidthDp >= 700
+    val controls: @Composable (Boolean) -> Unit = { sidebar ->
         TabRail(
-            sessions = sessions.map { it.label.value to it.alive.value },
+            sessions = sessions,
+            sidebar = sidebar,
             activeIndex = activeIndex,
-            onSelect = { activeIndex = it },
-            onClose = { closeSession(it) },
+            onSelect = { selectedSessionId = sessions[it].id; textInputSessionId = null },
+            onClose = { closeTargetId = sessions.getOrNull(it)?.id },
+            onTabAction = ::tabAction,
+            onMenuOpened = { viewClient.hideKeyboard() },
             onAdd = { addLinux() },
-            onConnect = {
-                viewClient.hideKeyboard()
-                setupStatus = "Checking SSH identity…"
-                scope.launch {
-                    Bootstrap.ensureIdentity(ctx)
-                        .onSuccess { publicKey = it; connectionsOpen = true }
-                        .onFailure { setupError = "SSH identity failed: ${it.message}" }
-                    setupStatus = null
-                }
-            },
-            onAddLinux = { addLinux() },
-            onLinuxManage = { linuxManageOpen = true },
+            onConnect = { viewClient.hideKeyboard(); connectionsOpen = true },
             onTheme = { themeOpen = true },
             onCopilot = { copilotOpen = !copilotOpen },
             onSettings = { settingsOpen = true },
         )
+    }
+    Row(modifier = Modifier.fillMaxSize()) {
+      if (expandedWorkspace) Box(Modifier.width(220.dp).fillMaxHeight()) { controls(true) }
+      Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+        if (!expandedWorkspace) controls(false)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg).padding(horizontal = 4.dp)) {
             AndroidView(
@@ -435,7 +593,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     TerminalViewport(c).apply { terminal.apply {
                         setTerminalViewClient(viewClient)
                         viewClient.view = this
-                        keepScreenOn = true
+                        this.keepScreenOn = screenShouldStayOn
                         isFocusable = true
                         isFocusableInTouchMode = true
                         setTextSize(fontPx) // creates the renderer; must precede setTypeface
@@ -448,6 +606,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                 },
                 update = { container ->
                     val v = container.terminal
+                    v.keepScreenOn = screenShouldStayOn
+                    viewClient.updateFontSize(fontPx)
                     v.setBackgroundColor(terminalBackground)
                     if (v.currentSession !== active.session) {
                         v.attachSession(active.session)
@@ -461,20 +621,47 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             }
         }
 
+        if (!active.alive.value) {
+            Row(Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Session ended", color = RailDimText, modifier = Modifier.weight(1f))
+                if (active.reconnectCommand != null) TextButton(onClick = {
+                    runCatching { service.reconnectSession(active) }
+                        .onSuccess { holder ->
+                            selectedSessionId = holder.id
+                            termViewRef.value?.let { it.attachSession(holder.session); it.onScreenUpdated() }
+                        }.onFailure { setupError = it.message ?: "Could not reconnect this tab." }
+                }) { Text("Reconnect this tab") }
+            }
+        }
+
         if (copilotOpen) {
+          androidx.compose.ui.window.Dialog(onDismissRequest = { copilotOpen = false },
+              properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+           BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(8.dp), contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = 680.dp).fillMaxWidth().heightIn(max = maxHeight).clip(RoundedCornerShape(16.dp)).background(RailSurfaceAlt)) {
+             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("AI Copilot", color = RailPromptText, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                TextButton(onClick = { copilotOpen = false }) { Text("Close AI") }
+             }
             CopilotPanel(
+                modifier = Modifier.weight(1f, fill = false),
                 input = aiInput,
                 onInput = { aiInput = it },
                 busy = aiBusy,
                 result = aiResult,
                 error = aiError,
                 isCommand = aiIsCommand,
+                originLabel = sessions.firstOrNull { it.id == aiOriginId }?.displayName,
                 onSend = { askAi(AiCopilot.Mode.COMMAND) },
                 onExplain = { askAi(AiCopilot.Mode.EXPLAIN) },
                 onInsert = { insertToTerminal(it, run = false) },
                 onRun = { insertToTerminal(it, run = true) },
-                onSettings = { settingsOpen = true },
+                onSettings = { copilotOpen = false; settingsOpen = true },
             )
+            }
+           }
+          }
         }
 
         if (viewClient.composingText.isNotEmpty()) {
@@ -540,68 +727,43 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onLongClick = { keysDialogOpen = true },
         )
     }
+    }
 
     val textTarget = sessions.firstOrNull { it.id == textInputSessionId }
+    val closeTarget = sessions.firstOrNull { it.id == closeTargetId }
+    if (closeTarget != null) {
+        AlertDialog(
+            onDismissRequest = { closeTargetId = null },
+            title = { Text("Close ${closeTarget.displayName}?") },
+            text = { Text("This closes the tab and its local process. Any unsubmitted draft in this tab will be discarded. A remote tmux workspace may continue on its server.") },
+            confirmButton = { TextButton(onClick = {
+                closeTargetId = null
+                closeSession(sessions.indexOf(closeTarget))
+            }) { Text("Close tab") } },
+            dismissButton = { TextButton(onClick = { closeTargetId = null }) { Text("Keep tab") } },
+        )
+    }
     if (textTarget != null) {
         TextInputDialog(
             value = textDrafts[textTarget.id].orEmpty(),
-            onValueChange = { textDrafts[textTarget.id] = it },
+            error = service.reviewedTextErrors[textTarget.id],
+            onValueChange = { textDrafts[textTarget.id] = it; service.reviewedTextErrors.remove(textTarget.id) },
             onInsert = {
                 val text = TerminalInteraction.reviewedText(textDrafts[textTarget.id].orEmpty())
                 if (textTarget.alive.value && textTarget.session.emulator != null) {
                     viewClient.clearStickyModifiers()
                     if (textTarget.session.tryPaste(text)) {
                         textDrafts.remove(textTarget.id)
+                        service.reviewedTextErrors.remove(textTarget.id)
                         textInputSessionId = null
                         termViewRef.value?.let(TerminalInteraction::followOutput)
                         viewClient.showKeyboard()
-                    }
+                    } else service.reviewedTextErrors[textTarget.id] = "The terminal could not accept this text. Your draft is kept; try again."
                 } else {
-                    textInputSessionId = null
-                    setupError = "This session has ended. Reconnect before inserting text. Your draft is still in Text / voice for this tab."
+                    service.reviewedTextErrors[textTarget.id] = "This session has ended. Reconnect before inserting. Your draft is kept."
                 }
             },
             onDismiss = { textInputSessionId = null; viewClient.showKeyboard() },
-        )
-    }
-
-    if (settingsOpen) {
-        SettingsDialog(
-            onThemes = { settingsOpen = false; themeOpen = true },
-            initialKey = Secrets.apiKey(ctx),
-            initialModel = Secrets.model(ctx),
-            initialBase = Secrets.baseUrl(ctx),
-            saveError = settingsSaveError ?: Secrets.storageError ?: Secrets.migrationNotice,
-            saving = settingsSaving,
-            onSave = { key, model, base ->
-                settingsSaving = true
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) { Secrets.saveConfiguration(ctx, key, model, base) }
-                    settingsSaving = false
-                    if (result.isSuccess) {
-                        settingsSaveError = null
-                        settingsOpen = false
-                        copilotOpen = true
-                    } else settingsSaveError = Secrets.storageError
-                }
-            },
-            onDismiss = { settingsOpen = false },
-            // Re-negotiate the IME contract immediately so the keyboard on screen picks the
-            // new mode up, instead of only the next one the user opens.
-            onKeyboardModeChanged = { viewClient.refreshIme() },
-        )
-    }
-
-    if (connectionsOpen) {
-        ConnectionsDialog(
-            keyImportMessage = keyImportMessage,
-            publicKey = publicKey,
-            onImportKey = onImportKey,
-            onCopyPublicKey = {
-                publicKey?.let { Clip.copy(it) }
-            },
-            onConnect = { connect(it) },
-            onDismiss = { connectionsOpen = false },
         )
     }
 
@@ -613,107 +775,46 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         )
     }
 
-    if (linuxManageOpen) {
-        LinuxManageDialog(
-            distro = Userland.installedDistro(ctx),
-            healthMessage = linuxHealthMessage,
-            healthBusy = linuxHealthBusy,
-            onCheck = {
-                linuxHealthBusy = true
-                linuxHealthMessage = "Testing the Linux toolchain…"
-                scope.launch {
-                    Bootstrap.healthCheck(ctx)
-                        .onSuccess { linuxHealthMessage = "Ready — ${it.lineSequence().firstOrNull().orEmpty()}" }
-                        .onFailure { linuxHealthMessage = "Self-test failed — ${it.message}" }
-                    linuxHealthBusy = false
-                }
-            },
-            onRepair = {
-                val distro = Userland.installedDistro(ctx)
-                if (distro == null) {
-                    linuxHealthMessage = "Linux is not installed."
-                } else {
-                    linuxHealthBusy = true
-                    linuxHealthMessage = "Repairing Linux…"
-                    scope.launch {
-                        Bootstrap.repair(ctx, distro) { msg ->
-                            scope.launch(Dispatchers.Main) { linuxHealthMessage = msg }
-                        }.onSuccess {
-                            publicKey = SshKeyStore.publicKey(ctx).getOrNull()
-                            linuxHealthMessage = "Ready — complete toolchain and SSH identity verified."
-                        }.onFailure { linuxHealthMessage = "Repair failed — ${it.message}" }
-                        linuxHealthBusy = false
-                    }
-                }
-            },
-            onUninstall = { uninstallLinux() },
-            onDismiss = { linuxManageOpen = false },
-        )
-    }
 
-    if (themeOpen) {
-        ThemePickerDialog(
-            currentId = currentTheme.id,
-            onPick = { setTheme(it) },
-            onDismiss = { themeOpen = false },
-        )
-    }
-
-    if (keysDialogOpen) {
-        ExtraKeysDialog(
-            current = extraKeys,
-            onPickPreset = { preset ->
-                ExtraKeysLayouts.savePreset(ctx, preset)
-                extraKeys = preset.keys
-            },
-            onChange = { keys ->
-                if (keys.isNotEmpty()) {
-                    ExtraKeysLayouts.saveCustom(ctx, keys)
-                    extraKeys = keys
-                }
-            },
-            onDismiss = { keysDialogOpen = false },
-        )
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TabRail(
-    sessions: List<Pair<String, Boolean>>,
+    sidebar: Boolean = false,
+    sessions: List<TermSession>,
     activeIndex: Int,
     onSelect: (Int) -> Unit,
     onClose: (Int) -> Unit,
+    onTabAction: (TermSession, TabAction) -> Unit,
+    onMenuOpened: () -> Unit,
     onAdd: () -> Unit,
     onConnect: () -> Unit,
-    onAddLinux: () -> Unit,
-    onLinuxManage: () -> Unit,
     onTheme: () -> Unit,
     onCopilot: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().background(RailSurfaceAlt)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(6.dp, 6.dp, 6.dp, 3.dp),
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            sessions.forEachIndexed { i, (label, alive) ->
+    var menuFor by remember { mutableStateOf<Int?>(null) }
+    val tabs: @Composable () -> Unit = {
+            sessions.forEachIndexed { i, holder ->
+              key(holder.id) { Box {
+                val label = holder.displayName
+                val alive = holder.alive.value
+                val accent = holder.accent()
                 val active = i == activeIndex
                 Column(
                     modifier = Modifier
-                        .width(IntrinsicSize.Max)
+                        .then(if (sidebar) Modifier.fillMaxWidth() else Modifier.width(IntrinsicSize.Max))
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (active) RailBg else RailSurface)
-                        .clickable { onSelect(i) },
+                        .combinedClickable(onClick = { onSelect(i) }, onLongClickLabel = "Tab options",
+                            onLongClick = { menuFor = holder.id; onMenuOpened() }),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp),
                     ) {
-                        Text("●", color = if (alive) RailAccent else RailDimText, fontSize = 9.sp)
+                        Text("●", color = if (alive) accent else RailDimText, fontSize = 9.sp)
                         Spacer(Modifier.width(6.dp))
                         Text(
                             label,
@@ -722,41 +823,50 @@ private fun TabRail(
                             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                             fontSize = 12.sp,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (sidebar) Modifier.weight(1f) else Modifier.widthIn(max = 168.dp),
                         )
                         if (active) {
-                            Text(
-                                "×",
-                                color = RailDimText,
-                                fontSize = 15.sp,
-                                modifier = Modifier
-                                    .padding(start = 10.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .clickable { onClose(i) }
-                                    .padding(horizontal = 3.dp),
-                            )
+                            Box(Modifier.size(48.dp).semantics { contentDescription = "Tab options for $label" }
+                                .clip(RoundedCornerShape(8.dp)).clickable { menuFor = holder.id; onMenuOpened() },
+                                contentAlignment = Alignment.Center) { Text("⋯", color = RailAccentDim, fontSize = 20.sp) }
+                            Box(Modifier.size(48.dp).semantics { contentDescription = "Close tab $label" }
+                                .clip(RoundedCornerShape(8.dp)).clickable { onClose(i) },
+                                contentAlignment = Alignment.Center) {
+                                Text("×", color = RailDimText, fontSize = 20.sp)
+                            }
                         }
                     }
                     Box(
                         Modifier.fillMaxWidth().height(2.dp)
-                            .background(if (active) RailAccent else Color.Transparent),
+                            .background(if (active) accent else Color.Transparent),
                     )
                 }
+                TabMenu(expanded = menuFor == holder.id, holder = holder, index = i, count = sessions.size,
+                    onDismiss = { menuFor = null }, onAction = { onTabAction(holder,it) })
+              } }
             }
-        }
-
-        // Session tabs may scroll; primary actions never do. This keeps every
-        // control reachable on a 390px phone instead of hiding Settings beyond
-        // the end of the tab strip.
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            RailAction("Connect", onConnect, Modifier.weight(1.3f))
-            RailAction("＋", onAdd, Modifier.weight(.7f))
-            RailAction("Linux", onAddLinux, Modifier.weight(1f), onLongClick = onLinuxManage)
-            RailAction("AI", onCopilot, Modifier.weight(.75f))
-            RailAction("Theme", onTheme, Modifier.weight(1f))
-            RailAction("⚙", onSettings, Modifier.width(44.dp))
+    }
+    Column(Modifier.fillMaxWidth().then(if (sidebar) Modifier.fillMaxHeight() else Modifier).background(RailSurfaceAlt)) {
+        if (sidebar) {
+            Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.padding(14.dp))
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
+            Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                RailAction("Connect",onConnect,Modifier.fillMaxWidth())
+                RailAction("New tab",onAdd,Modifier.fillMaxWidth())
+                RailAction("AI",onCopilot,Modifier.fillMaxWidth())
+                RailAction("Theme",onTheme,Modifier.fillMaxWidth())
+                RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
+            }
+        } else {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,6.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                RailAction("Connect",onConnect,Modifier.weight(1.3f))
+                RailAction("New tab",onAdd,Modifier.weight(1.2f))
+                RailAction("AI",onCopilot,Modifier.weight(.75f))
+                RailAction("Theme",onTheme,Modifier.weight(1f))
+                RailAction("⚙",onSettings,Modifier.width(48.dp).semantics { contentDescription = "Settings" })
+            }
         }
     }
 }
@@ -771,14 +881,14 @@ private fun RailAction(
 ) {
     Box(
         modifier = modifier
-            .height(36.dp)
+            .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(RailSurface)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = RailAccentDim, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 10.sp, maxLines = 1)
+        Text(label, color = RailAccentDim, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 11.sp, maxLines = 1)
     }
 }
 
@@ -829,7 +939,7 @@ private fun SetupOverlay(status: String?, error: String?, onDismiss: () -> Unit)
 }
 
 @Composable
-private fun SetupHome(installed: Boolean, onSetup: () -> Unit, onRepair: () -> Unit) {
+private fun SetupHome(installed: Boolean, onSetup: () -> Unit, onRepair: () -> Unit, onSettings: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().background(RailBg).padding(28.dp),
         verticalArrangement = Arrangement.Center,
@@ -861,6 +971,7 @@ private fun SetupHome(installed: Boolean, onSetup: () -> Unit, onRepair: () -> U
                 color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp,
             )
         }
+        TextButton(onClick = onSettings) { Text("Settings and diagnostics") }
     }
 }
 

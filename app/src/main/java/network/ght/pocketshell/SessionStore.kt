@@ -28,7 +28,7 @@ object SessionStore {
     }
 
     private const val FILE_NAME = "sessions_snapshot.json"
-    private const val VERSION = 1
+    private const val VERSION = 2
 
     /** Cap per session so the snapshot file (and restore) stays cheap. */
     private const val MAX_TRANSCRIPT_CHARS = 8_000
@@ -38,6 +38,11 @@ object SessionStore {
         val title: String,
         val cwd: String?,
         val transcript: String,
+        val tabId: String = TabIdentity.create(),
+        val customName: String? = null,
+        val color: String? = null,
+        val startupCommand: String? = null,
+        val connectionProfile: SshProfile? = null,
     )
 
     private fun file(context: Context): File = File(context.noBackupFilesDir, FILE_NAME)
@@ -67,6 +72,12 @@ object SessionStore {
             sessions.forEach { s ->
                 val o = JSONObject()
                 o.put("mode", s.mode.name)
+                o.put("tabId", TabIdentity.requireValid(s.tabId))
+                s.customName?.let { o.put("customName",it) }
+                s.color?.let { o.put("color",it) }
+                s.startupCommand?.let { o.put("startupCommand",it) }
+                s.connectionProfile?.let { p -> o.put("connection", JSONObject().put("name",p.name).put("host",p.host)
+                    .put("user",p.user).put("port",p.port).put("tmux",p.tmuxSession).put("remote",p.remoteCommand)) }
                 o.put("title", s.title)
                 if (!s.cwd.isNullOrBlank()) o.put("cwd", s.cwd)
                 o.put("transcript", capTranscript(s.transcript))
@@ -97,15 +108,29 @@ object SessionStore {
         return runCatching {
             val root = JSONObject(AtomicFile(f).openRead().bufferedReader().use { it.readText() })
             val arr = root.optJSONArray("sessions") ?: return emptyList()
+            val seen = mutableSetOf<String>()
             (0 until arr.length()).mapNotNull { i ->
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
                 val mode = runCatching { SessionMode.valueOf(o.optString("mode")) }.getOrNull()
                     ?: return@mapNotNull null
+                val restoredId = TabIdentity.restore(o.optString("tabId")).let { id ->
+                    if (seen.add(id)) id else TabIdentity.create().also { seen.add(it) }
+                }
                 Saved(
                     mode = mode,
                     title = o.optString("title").ifBlank { "sh" },
                     cwd = o.optString("cwd").takeIf { it.isNotBlank() },
                     transcript = o.optString("transcript"),
+                    customName = TabNames.normalize(o.optString("customName")),
+                    color = TabColors.byId(o.optString("color"))?.id,
+                    // Legacy commands without an explicit tab identity could rejoin a
+                    // shared tmux workspace. Keep their history, require a fresh Connect.
+                    startupCommand = o.optString("startupCommand").takeIf { it.contains(restoredId) },
+                    connectionProfile = o.optJSONObject("connection")?.let { p -> runCatching {
+                        SshProfile(p.getString("name"),p.getString("host"),p.optString("user"),p.getInt("port"),p.optString("tmux"),p.optString("remote"))
+                            .also { it.command() }
+                    }.getOrNull() },
+                    tabId = restoredId,
                 )
             }
         }.getOrElse { emptyList() }

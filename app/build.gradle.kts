@@ -22,8 +22,8 @@ android {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 20
-        versionName = "0.5.3"
+        versionCode = 22
+        versionName = "0.5.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
         externalNativeBuild {
@@ -61,6 +61,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            versionNameSuffix = "-review.1"
+        }
         release {
             isMinifyEnabled = false
             // Sign with the release key when keystore.properties is present.

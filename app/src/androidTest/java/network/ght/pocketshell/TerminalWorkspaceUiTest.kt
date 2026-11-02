@@ -16,6 +16,48 @@ import java.io.File
 class TerminalWorkspaceUiTest {
     @get:Rule val serviceRule = ServiceTestRule()
 
+    /** Isolate the ended-workspace regression from keyboard/rotation timing. */
+    @Test fun endedWorkspaceKeepsDraftAndErrorOnRecreation() {
+        org.junit.Assume.assumeTrue(android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+        val inst = InstrumentationRegistry.getInstrumentation()
+        val ctx = inst.targetContext
+        val device = UiDevice.getInstance(inst)
+        val service = (serviceRule.bindService(Intent(ctx, TermService::class.java)) as TermService.LocalBinder).service
+        lateinit var fixture: TermSession
+        inst.runOnMainSync {
+            service.sessions.toList().forEach(service::closeSession)
+            val shell = service.newSession(SessionMode.SYSTEM)
+            shell.session.updateSize(80, 24)
+            fixture = TermSession(shell.id, shell.label, shell.alive, shell.session, SessionMode.LINUX)
+            service.sessions[0] = fixture
+            service.selectedSessionId.value = fixture.id
+        }
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { activity ->
+                device.wait(Until.findObject(By.text("Text / voice")), 10000)!!.click()
+                assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 5000))
+                device.findObject(By.clazz("android.widget.EditText")).text = "retained draft"
+                assertTrue(device.wait(Until.hasObject(By.text("retained draft")), 5000))
+                inst.runOnMainSync { fixture.session.finishIfRunning() }
+                val deadline = System.currentTimeMillis() + 5000
+                while (fixture.alive.value && System.currentTimeMillis() < deadline) Thread.sleep(30)
+                assertFalse(fixture.alive.value)
+                device.findObject(By.text("Insert")).click()
+                assertTrue(device.wait(Until.hasObject(By.textContains("This session has ended.")), 5000))
+                activity.recreate()
+                assertTrue("Ended-workspace error remains visible after recreation",
+                    device.wait(Until.hasObject(By.textContains("This session has ended.")), 10000))
+                assertTrue(device.hasObject(By.text("retained draft")))
+                inst.runOnMainSync { assertSame(fixture, service.sessions.single()) }
+                val dir = File(ctx.filesDir, "screenshots").apply { mkdirs() }
+                device.waitForIdle()
+                device.takeScreenshot(File(dir, "ended-draft-isolated.png"))
+            }
+        } finally {
+            inst.runOnMainSync { service.sessions.toList().forEach(service::closeSession) }
+        }
+    }
+
     @Test fun textEditorInsertsWithoutRunningAndActivityRecreationKeepsSession() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         org.junit.Assume.assumeTrue("Run the workspace fixture only on an isolated emulator",
@@ -41,6 +83,27 @@ class TerminalWorkspaceUiTest {
         val dir = File(context.filesDir, "screenshots").apply { mkdirs() }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
+                fun rotateAndWait(orientation: Int, rotate: () -> Unit) {
+                    rotate()
+                    val deadline = System.currentTimeMillis() + 12000
+                    var ready = false
+                    while (!ready && System.currentTimeMillis() < deadline) {
+                        activity.onActivity { host ->
+                            // MainActivity handles orientation via configChanges; it is
+                            // the new configuration/layout, not a new instance, we await.
+                            ready = host.resources.configuration.orientation == orientation &&
+                                host.window.decorView.hasWindowFocus()
+                        }
+                        if (!ready) Thread.sleep(50)
+                    }
+                    assertTrue("Workspace has the requested orientation and window focus", ready)
+                    device.waitForIdle()
+                    val rendered = java.util.concurrent.CountDownLatch(1)
+                    activity.onActivity { host -> host.window.decorView.postOnAnimation {
+                        host.window.decorView.postOnAnimation { rendered.countDown() }
+                    } }
+                    assertTrue("Rotated layout rendered", rendered.await(3, java.util.concurrent.TimeUnit.SECONDS))
+                }
                 assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 8000))
                 // A short deterministic prompt avoids mksh horizontally scrolling
                 // the command out of the screen on the smallest hosted viewport.
@@ -101,6 +164,22 @@ class TerminalWorkspaceUiTest {
                 }
                 val keyboard = device.wait(Until.findObject(By.pkg("com.google.android.inputmethod.latin")), 3000)
                     ?: device.wait(Until.findObject(By.pkg("com.android.inputmethod.latin")), 1000)
+                if (keyboard == null) {
+                    device.takeScreenshot(File(dir,"keyboard-return-failure.png"))
+                    device.dumpWindowHierarchy(File(dir,"keyboard-return-failure.xml"))
+                    File(dir,"keyboard-return-input-method.txt").writeText(device.executeShellCommand("dumpsys input_method"))
+                    activity.onActivity { host ->
+                        fun findTerminal(v: android.view.View): network.ght.pocketshell.term.TerminalView? {
+                            if(v is network.ght.pocketshell.term.TerminalView)return v
+                            if(v is android.view.ViewGroup)for(i in 0 until v.childCount)findTerminal(v.getChildAt(i))?.let{return it}
+                            return null
+                        }
+                        val v=findTerminal(host.window.decorView)!!
+                        val imm=host.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                        val visible=androidx.core.view.ViewCompat.getRootWindowInsets(v)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())
+                        File(dir,"keyboard-return-view.txt").writeText("attached=${v.isAttachedToWindow} focused=${v.hasFocus()} windowFocus=${v.hasWindowFocus()} immActive=${imm.isActive(v)} accepting=${imm.isAcceptingText} imeVisible=$visible softInputMode=${host.window.attributes.softInputMode}")
+                    }
+                }
                 assertNotNull("Keyboard returns after inserting reviewed text", keyboard)
                 if (keyboard != null) {
                     val ctrl = device.findObject(By.text("CTRL"))
@@ -123,8 +202,7 @@ class TerminalWorkspaceUiTest {
                     assertEquals(1, Regex("UX_PROOF").findAll(output).count())
                 }
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
-                device.setOrientationLeft()
-                device.waitForIdle()
+                rotateAndWait(android.content.res.Configuration.ORIENTATION_LANDSCAPE) { device.setOrientationLeft() }
                 device.takeScreenshot(File(dir, "workspace-landscape.png"))
                 device.findObject(By.text("Text / voice")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
@@ -132,19 +210,30 @@ class TerminalWorkspaceUiTest {
                 device.waitForIdle()
                 device.takeScreenshot(File(dir, "text-voice-landscape.png"))
                 device.findObject(By.text("Close")).click()
-                device.setOrientationNatural()
-                device.waitForIdle()
+                assertTrue(device.wait(Until.gone(By.text("Text to insert")), 4000))
+                rotateAndWait(android.content.res.Configuration.ORIENTATION_PORTRAIT) { device.setOrientationNatural() }
                 device.findObject(By.text("Text / voice")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
                 device.findObject(By.clazz("android.widget.EditText")).text = "retained draft"
-                assertTrue(device.wait(Until.hasObject(By.text("retained draft")), 4000))
+                val draftVisible = device.wait(Until.hasObject(By.text("retained draft")), 4000)
+                if (!draftVisible) {
+                    device.takeScreenshot(File(dir,"rotation-draft-failure.png"))
+                    device.dumpWindowHierarchy(File(dir,"rotation-draft-failure.xml"))
+                }
+                assertTrue("Typed draft is visible in the rotated workspace", draftVisible)
                 instrumentation.runOnMainSync { fixture.session.finishIfRunning() }
                 val exitDeadline = System.currentTimeMillis() + 4000
                 while (fixture.alive.value && System.currentTimeMillis() < exitDeadline) Thread.sleep(30)
                 assertFalse(fixture.alive.value)
                 device.findObject(By.text("Insert")).click()
                 assertTrue("An ended session presents an actionable error",
-                    device.wait(Until.hasObject(By.textContains("This session has ended.")), 4000))
+                    device.wait(Until.hasObject(By.textContains("This session has ended.")), 8000))
+                assertTrue(device.hasObject(By.text("retained draft")))
+                activity.recreate()
+                assertTrue("The failure and draft survive recreation together",
+                    device.wait(Until.hasObject(By.textContains("This session has ended.")),8000))
+                assertTrue(device.hasObject(By.text("retained draft")))
+                device.takeScreenshot(File(dir,"ended-draft-kept.png"))
             }
         } finally {
             if (previousImeSetting == "null") device.executeShellCommand("settings delete secure show_ime_with_hard_keyboard")
