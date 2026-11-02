@@ -67,6 +67,7 @@ object SshShortcuts {
         }
         append("Host ${(dropletAliases + machines.flatMap { it.aliases }).joinToString(" ")}\n")
         append("    IdentityFile ~/.ssh/id_ed25519\n")
+        append("    SendEnv GHT_TAB_ID\n")
         append("    StrictHostKeyChecking accept-new\n")
         append("    ServerAliveInterval 20\n    ServerAliveCountMax 3\n")
     }

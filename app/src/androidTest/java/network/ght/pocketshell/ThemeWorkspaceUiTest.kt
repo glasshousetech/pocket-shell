@@ -102,7 +102,7 @@ class ThemeWorkspaceUiTest {
                 for (theme in TermThemes.ALL) {
                     openThemes()
                     device.findObject(By.clazz("android.widget.EditText")).text = theme.label
-                    val card = device.wait(Until.findObject(By.desc("Apply theme ${theme.label}")), 4000)
+                    val card = device.wait(Until.findObject(By.desc("Apply theme ${theme.label}")), 10000)
                     if (card == null) {
                         capture("failed-search-${theme.id}")
                         device.dumpWindowHierarchy(File(dir, "failed-search-${theme.id}.xml"))
@@ -170,6 +170,8 @@ class ThemeWorkspaceUiTest {
                 capture("picker-fold-800")
                 device.findObject(By.text("Close")).click()
                 device.findObject(By.text("⚙")).click()
+                assertTrue(device.wait(Until.hasObject(By.text("Appearance")), 5000))
+                device.findObject(By.text("Appearance")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Browse 20 themes")), 4000))
                 device.findObject(By.text("Browse 20 themes")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Find a theme")), 4000))

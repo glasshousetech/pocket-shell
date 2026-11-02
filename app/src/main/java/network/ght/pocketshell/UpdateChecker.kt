@@ -35,14 +35,18 @@ object UpdateChecker {
         )
     }
 
-    /** Simple dotted-numeric compare ("0.1.2" vs "0.1.10"); unparsed segments compare as 0. */
-    private fun compareVersions(a: String, b: String): Int {
-        val ax = a.split(".").map { it.toIntOrNull() ?: 0 }
-        val bx = b.split(".").map { it.toIntOrNull() ?: 0 }
+    /** Compare numeric releases without misreading a review suffix as a zero patch number. */
+    internal fun compareVersions(a: String, b: String): Int {
+        fun core(value: String) = value.removePrefix("v").substringBefore('-').substringBefore('+')
+            .split('.').map { it.toIntOrNull() ?: error("Unrecognized release version.") }
+        val ax = core(a)
+        val bx = core(b)
         for (i in 0 until maxOf(ax.size, bx.size)) {
-            val diff = (ax.getOrElse(i) { 0 }) - (bx.getOrElse(i) { 0 })
+            val diff = ax.getOrElse(i) { 0 }.compareTo(bx.getOrElse(i) { 0 })
             if (diff != 0) return diff
         }
+        if (a.contains('-') && !b.contains('-')) return -1
+        if (!a.contains('-') && b.contains('-')) return 1
         return 0
     }
 }

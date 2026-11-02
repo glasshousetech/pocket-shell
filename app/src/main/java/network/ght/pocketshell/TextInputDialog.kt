@@ -19,6 +19,7 @@ import androidx.compose.ui.window.DialogProperties
 @Composable
 fun TextInputDialog(
     value: String,
+    error: String? = null,
     onValueChange: (String) -> Unit,
     onInsert: () -> Unit,
     onDismiss: () -> Unit,
@@ -41,6 +42,8 @@ fun TextInputDialog(
                         TextButton(onClick = onDismiss) { Text("Close") }
                         TextButton(onClick = onInsert, enabled = TerminalInteraction.reviewedText(value).isNotBlank()) { Text("Insert") }
                     }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                        maxLines = if (compact) 2 else 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
                     if (!compact) {
                         Text("Use your keyboard’s microphone, then review and insert. Press Enter in the terminal when ready.",
                             style = MaterialTheme.typography.bodySmall)

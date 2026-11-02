@@ -216,7 +216,7 @@ object Bootstrap {
         runGuest(context, distro, command, 420)
     }
 
-    private fun ensureIdentitySync(context: Context, distro: Distro) {
+    private fun ensureIdentitySync(context: Context, distro: Distro) = synchronized(SshKeyStore.identityLock) {
         runGuest(
             context,
             distro,
@@ -241,6 +241,17 @@ object Bootstrap {
                 "printf 'READY '; bash --version | head -1; ssh -V; tmux -V; git --version; python3 --version; node --version; npm --version",
             45,
         )
+    }
+
+    /** Runs a bounded guest command and drains output without defeating the timeout. */
+    internal fun deriveImportedPublicKey(context: Context, distro: Distro, stagedName: String): String {
+        require(stagedName.matches(Regex("\\.import-[a-f0-9-]+")))
+        return try {
+            runGuest(context, distro, "ssh-keygen -y -P '' -f /root/.ssh/$stagedName < /dev/null", 15)
+                .trim().also { require(SshKeyStore.isPublicKey(it)) }
+        } catch (_: Exception) {
+            error("The key could not be validated. Use an unencrypted OpenSSH or PEM private key and a working Linux environment. Your existing identity was kept.")
+        }
     }
 
     /** Runs a bounded guest command and drains output without defeating the timeout. */

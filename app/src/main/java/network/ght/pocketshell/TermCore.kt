@@ -42,10 +42,12 @@ object TermCore {
         mode: SessionMode,
         cwd: String? = null,
         startupCommand: String? = null,
+        tabId: String = TabIdentity.create(),
         onRedraw: (TerminalSession) -> Unit,
         onTitle: (TerminalSession) -> Unit,
         onFinished: (TerminalSession) -> Unit,
     ): TerminalSession {
+        TabIdentity.requireValid(tabId)
         val client = RailSessionClient(onRedraw, onTitle, onFinished) {
             android.widget.Toast.makeText(context.applicationContext,
                 "Input could not be queued. The session has ended or is not reading input. Your reviewed draft is kept.",
@@ -63,7 +65,7 @@ object TermCore {
                 // defensively (should be unreachable — the UI only offers a
                 // LINUX session once Bootstrap.install has set a marker).
                 val distro = Userland.installedDistro(context) ?: Distro.Alpine
-                val args = Userland.prootArgs(context, distro, startupCommand)
+                val args = Userland.prootArgs(context, distro, startupCommand, tabId)
                 TerminalSession(
                     args[0],                    // proot binary
                     home,                       // host cwd
@@ -82,6 +84,7 @@ object TermCore {
                 // so dotfiles/history persist; xterm-256color unlocks color.
                 val env = arrayOf(
                     "TERM=xterm-256color",
+                    "GHT_TAB_ID=$tabId",
                     "HOME=$home",
                     "TMPDIR=$tmp",
                     "PATH=/system/bin:/system/xbin",

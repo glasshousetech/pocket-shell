@@ -11,9 +11,10 @@ class SshShortcutsTest {
     @Test
     fun machineProfileHopsThroughDropletWithoutTmux() {
         val laptop = SshShortcuts.machines.first { it.id == "alientop" }
-        val command = SshShortcuts.profile(laptop).command()
+        val tabId = TabIdentity.create()
+        val command = SshShortcuts.profile(laptop).command(tabId)
 
-        assertTrue(command.endsWith("connor@agent.ght.network '~/.local/bin/ght-hop alientop'"))
+        assertTrue(command.endsWith("connor@agent.ght.network 'GHT_TAB_ID=$tabId ~/.local/bin/ght-hop alientop'"))
         assertTrue(command.contains("-i ~/.ssh/id_ed25519"))
         assertFalse(command.contains("tmux"))
     }

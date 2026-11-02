@@ -17,8 +17,10 @@ on an ARM64 Android phone. A successful Gradle build is not acceptance.
    droplet**. A private-key import is an optional migration path, not setup.
 5. Reach `connor@agent.ght.network`, start an agent CLI,
    background Pocket Shell, lock the phone, and return to the same live CLI.
-6. Disable/re-enable networking, reconnect, and confirm `tmux new-session -A
-   -s agents` returns to the running agent rather than starting over.
+6. Open two connections to the same host. Confirm their `GHT_TAB_ID` values,
+   remote shell PIDs and state are independent. Disable/re-enable networking,
+   reconnect the original tab, and confirm its UUID-scoped tmux session returns
+   to the same running agent without changing the sibling tab.
 7. Verify ESC, TAB, Ctrl-C, Ctrl-D, arrows, copy/paste, selection, and IME resize.
 8. Long-press the Linux tab, run **Self-test**, and confirm it reports `Ready`.
 
@@ -63,9 +65,46 @@ on an ARM64 Android phone. A successful Gradle build is not acceptance.
 - A fresh install generates Ed25519 identity files at modes 0600/0644. Connect
   explicitly uses the private key with `IdentitiesOnly=yes` and safely accepts a
   new host key while continuing to reject a changed host key.
-- Imported private keys are capped at 64 KiB, format-checked, and written as
-  `~/.ssh/id_ed25519` with directory mode 0700 and file mode 0600. Any stale
-  public half is deleted and re-derived before Connect becomes available.
+- Imported private keys are capped at 64 KiB and staged at mode 0600 in the
+  private mode 0700 SSH directory. `ssh-keygen` must parse the staged key and
+  derive its public half before atomic replacement of `~/.ssh/id_ed25519`.
+  Rejected inputs preserve the old identity. Interrupted public-metadata
+  replacement leaves missing, regenerable metadata rather than a mismatched
+  public key. Encrypted-key support and managed backup/export are not provided;
+  keep a secure external backup before replacing a working identity.
+
+## 0.5.4 workspace overhaul
+
+The approved release candidate has build code 22 (private review used21). Synthetic
+Android PTYs verify terminal/UI mechanics; server-side SSH checks verify
+UUID-isolated remote processes and reconnect. Neither substitutes for the
+ARM64 acceptance path above. Physical Fold access, valid-key import on ARM64,
+production-signed upgrade, network/screen-off behavior and live AI-provider
+responses remain pending.
+
+Selected tabs, reviewed drafts, their delivery errors and AI request/results
+live with the foreground service across Activity recreation. They are not
+written to diagnostic logs or Android saved-state Bundles. Process death is
+different: saved terminal snapshots can restore historical output into fresh
+local shells, but cannot restore a live PTY or an in-memory unsent draft.
+
+An ended tab is still an existing workspace. Activity startup must not run
+first-use setup or close service-owned tabs merely because none is alive.
+Doing so discarded ended-session history, drafts and their delivery errors.
+The workspace regression exercises an ended shell, rejected Insert and
+Activity recreation together; cancellation and renamed-tab close prompts are
+also exercised through the native UI.
+
+AI insertion accepts only a reviewed single-line command, only in its original
+live tab. Multiline/control-containing suggestions remain visible and are
+rejected without rewriting or submission. Insert does not send Enter; Run is
+explicit. Requests disclose that up to 4,000 characters of terminal context
+are included. Provider credentials and text remain excluded from diagnostics.
+
+Settings → Diagnostics retrieves bounded local operational logs (two 128 KiB
+files, bounded asynchronous queue). Events include app/build, UTC timestamp,
+component, event, session correlation and relevant tab/exit context, without
+terminal output, commands, connection addresses or key material.
 
 ## v0.4 acceptance status
 

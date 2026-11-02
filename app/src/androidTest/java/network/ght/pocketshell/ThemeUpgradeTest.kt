@@ -13,15 +13,19 @@ class ThemeUpgradeTest {
         val args = InstrumentationRegistry.getArguments()
         val prefs = context.getSharedPreferences("pocketshell_prefs", android.content.Context.MODE_PRIVATE)
         val marker = File(context.filesDir, "theme-upgrade-fixture.txt")
+        val expectedVersion = requireNotNull(args.getString("expectedVersionCode")) {
+            "Pass the exact candidate versionCode to verify a real update"
+        }.toLong()
+        val installedVersion = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
         if (args.getString("phase") == "prepare") {
             assertTrue(prefs.edit().putString("terminal_theme", "nord").putString("theme_upgrade_neighbor", "preserve-me").commit())
+            assertTrue("The fixture must begin on an older release", installedVersion < expectedVersion)
             marker.writeText("existing-app-private-data")
         } else {
             assertEquals("nord", prefs.getString("terminal_theme", null))
             assertEquals("preserve-me", prefs.getString("theme_upgrade_neighbor", null))
             assertEquals("existing-app-private-data", marker.readText())
-            val info = context.packageManager.getPackageInfo(context.packageName, 0)
-            assertTrue("The prior release APK must have been replaced", info.longVersionCode >= 15)
+            assertEquals("The exact signed candidate must be installed", expectedVersion, installedVersion)
         }
     }
 }
