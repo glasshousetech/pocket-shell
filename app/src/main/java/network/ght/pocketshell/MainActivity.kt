@@ -125,7 +125,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     val density = LocalDensity.current
     var fontPoints by remember { mutableIntStateOf(WorkspacePrefs.fontSize(ctx)) }
     var screenShouldStayOn by remember { mutableStateOf(WorkspacePrefs.keepScreenOn(ctx)) }
-    val fontPx = with(density) { fontPoints.sp.toPx() }.toInt().coerceAtLeast(18)
+    val fontPx = with(density) { fontPoints.sp.toPx() }.toInt().coerceAtLeast(1)
     val mono = remember {
         runCatching { ResourcesCompat.getFont(ctx, R.font.jbm_regular) }.getOrNull() ?: Typeface.MONOSPACE
     }

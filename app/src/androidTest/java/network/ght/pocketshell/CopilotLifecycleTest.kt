@@ -47,6 +47,15 @@ class CopilotLifecycleTest {
                 assertTrue(device.wait(Until.hasObject(By.text("original request")),8000))
                 inst.runOnMainSync { assertTrue(service.copilot.busy.value); assertEquals(origin.id,service.copilot.originId.value) }
                 device.findObject(By.clazz("android.widget.EditText")).text = "next unsent question"
+                assertTrue("New input has reached the UI before the provider replies",
+                    device.wait(Until.hasObject(By.text("next unsent question")),8000))
+                val inputDeadline = System.currentTimeMillis()+8000
+                var inputAccepted = false
+                while (!inputAccepted && System.currentTimeMillis()<inputDeadline) {
+                    inst.runOnMainSync { inputAccepted = service.copilot.input.value == "next unsent question" }
+                    if (!inputAccepted) Thread.sleep(30)
+                }
+                assertTrue("User input is accepted before completing the pending provider fixture",inputAccepted)
                 response.complete(Result.success("printf COPILOT_REVIEW"))
                 assertTrue(device.wait(Until.hasObject(By.text("printf COPILOT_REVIEW")),8000))
                 assertTrue(device.hasObject(By.text("next unsent question")))

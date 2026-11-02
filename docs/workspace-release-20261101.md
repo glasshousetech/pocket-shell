@@ -27,3 +27,10 @@ encrypted keys, managed key export and the complete updater handoff remain open.
 Updating Android restarts the app and ends local processes. Remote tmux work can
 be reattached; historical output is not a resumed local process. Do not silently
 install over Connor's active terminal or uninstall it to resolve a signature error.
+
+The first expanded CI run passed41/43 Android checks and exposed a density bug:
+an inherited18-pixel minimum made13sp and14sp identical at the CI display density.
+The terminal now converts the configured sp size without that unrelated clamp.
+The existing font/persistence UI regression remains unchanged. The controlled AI
+test now waits for the new user input to be accepted before completing its fake
+provider response; all post-response and recreation assertions remain intact.
