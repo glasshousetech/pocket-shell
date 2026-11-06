@@ -66,8 +66,27 @@ class TabMenuUiTest {
         assertSame(why, onMain { holder.session }, visibleSession(activity))
     }
 
+    private fun findTab(tabText: String): UiObject2 {
+        device.waitForIdle()
+        device.findObject(By.text(tabText))?.let { return it }
+        // Other workspace rows also scroll. Target the named tab rail, and
+        // scroll a background tab into view without selecting a different PTY.
+        val rail = androidx.test.uiautomator.UiScrollable(
+            androidx.test.uiautomator.UiSelector().description("Session tabs"))
+        if (device.hasObject(By.text("WORKSPACES"))) rail.setAsVerticalList()
+        else rail.setAsHorizontalList()
+        rail.scrollIntoView(androidx.test.uiautomator.UiSelector().text(tabText))
+        val found = device.wait(Until.findObject(By.text(tabText)), 5000)
+        if (found == null) {
+            val shots = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+            device.dumpWindowHierarchy(File(shots, "tab-scroll-failure.xml"))
+            device.takeScreenshot(File(shots, "tab-scroll-failure.png"))
+        }
+        return found ?: throw AssertionError("Tab is unreachable by scrolling: $tabText")
+    }
+
     private fun openMenu(tabText: String) {
-        find(tabText).longClick()
+        findTab(tabText).longClick()
         assertTrue("Long-pressing the tab text opens its menu", device.wait(Until.hasObject(By.text("Rename…")), 5000))
     }
 
@@ -125,9 +144,9 @@ class TabMenuUiTest {
                 onMain { service.selectedSessionId.value = fixtures.last().id }
                 assertTabControls(fixtures.last(), activity)
                 // Scrolling to older tabs is still allowed while a distant tab is selected.
-                androidx.test.uiautomator.UiScrollable(androidx.test.uiautomator.UiSelector().scrollable(true))
-                    .setAsHorizontalList().scrollToBeginning(20)
-                find(fixtures.first().displayName).click()
+                val firstTab = findTab(fixtures.first().displayName)
+                assertVisible(activity, fixtures.last(), "Manual scrolling must not select another terminal")
+                firstTab.click()
                 waitFor("first tab selected") { service.selectedSessionId.value == fixtures.first().id }
                 assertTabControls(fixtures.first(), activity)
                 onMain { service.moveSession(fixtures.first(), service.sessions.lastIndex) }

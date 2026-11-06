@@ -870,7 +870,7 @@ private fun TabRail(
         .onSizeChanged { railSize = it }.background(RailSurfaceAlt)) {
         if (sidebar) {
             Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.padding(14.dp))
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
+            Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
             Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 RailAction("Connect",onConnect,Modifier.fillMaxWidth())
                 RailAction("New tab",onAdd,Modifier.fillMaxWidth())
@@ -879,7 +879,7 @@ private fun TabRail(
                 RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
             }
         } else {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,6.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
+            Row(Modifier.fillMaxWidth().semantics { contentDescription = "Session tabs" }.horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,6.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 RailAction("Connect",onConnect,Modifier.weight(1.3f))
                 RailAction("New tab",onAdd,Modifier.weight(1.2f))
