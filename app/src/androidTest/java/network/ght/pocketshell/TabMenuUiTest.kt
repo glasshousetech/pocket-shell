@@ -71,14 +71,34 @@ class TabMenuUiTest {
         device.findObject(By.text(tabText))?.let { return it }
         // Other workspace rows also scroll. Target the named tab rail, and
         // scroll a background tab into view without selecting a different PTY.
-        val rail = androidx.test.uiautomator.UiScrollable(
-            androidx.test.uiautomator.UiSelector().description("Session tabs"))
-        if (device.hasObject(By.text("WORKSPACES"))) rail.setAsVerticalList()
-        else rail.setAsHorizontalList()
-        rail.scrollIntoView(androidx.test.uiautomator.UiSelector().text(tabText))
+        val trace = mutableListOf<String>()
+        val vertical = device.hasObject(By.text("WORKSPACES"))
+        // UiScrollable stops when its legacy scroll-event heuristic says "end",
+        // even though Compose still exposes off-screen tabs. Drive real gestures
+        // and inspect each resulting viewport instead of trusting that heuristic.
+        for (towardStart in listOf(true, false)) {
+            repeat(24) {
+                device.findObject(By.text(tabText))?.let { return it }
+                val rail = device.findObject(By.desc("Session tabs"))
+                    ?: throw AssertionError("Session tab rail is missing")
+                val b = rail.visibleBounds
+                val before = rail.findObjects(By.clazz("android.widget.TextView")).map { it.text }
+                val near = if (vertical) b.top + b.height() / 5 else b.left + b.width() / 5
+                val far = if (vertical) b.bottom - b.height() / 5 else b.right - b.width() / 5
+                val start = if (towardStart) near else far
+                val end = if (towardStart) far else near
+                if (vertical) device.swipe(b.centerX(), start, b.centerX(), end, 30)
+                else device.swipe(start, b.centerY(), end, b.centerY(), 30)
+                device.waitForIdle()
+                val after = device.findObject(By.desc("Session tabs"))
+                    ?.findObjects(By.clazz("android.widget.TextView"))?.map { it.text }
+                trace += "towardStart=$towardStart before=$before after=$after"
+            }
+        }
         val found = device.wait(Until.findObject(By.text(tabText)), 5000)
         if (found == null) {
             val shots = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+            File(shots, "tab-scroll-trace.txt").writeText(trace.joinToString("\n"))
             device.dumpWindowHierarchy(File(shots, "tab-scroll-failure.xml"))
             device.takeScreenshot(File(shots, "tab-scroll-failure.png"))
         }
