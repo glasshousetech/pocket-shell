@@ -71,6 +71,103 @@ class TabMenuUiTest {
         assertTrue("Long-pressing the tab text opens its menu", device.wait(Until.hasObject(By.text("Rename…")), 5000))
     }
 
+    @Test fun selectedTabStaysReachableAcrossSelectionReorderAndFolding() {
+        assumeTrue("Run only on an isolated emulator",
+            android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+        val context = instrumentation.targetContext
+        val originalSize = device.executeShellCommand("wm size").substringAfter("Override size: ", "").trim()
+        val originalDensity = device.executeShellCommand("wm density").substringAfter("Override density: ", "").trim()
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            device.executeShellCommand("pm grant ${context.packageName} android.permission.POST_NOTIFICATIONS")
+        }
+        val service = (serviceRule.bindService(Intent(context, TermService::class.java)) as TermService.LocalBinder).service
+        val fixtures = onMain {
+            service.sessions.toList().forEach(service::closeSession)
+            (1..12).map { index ->
+                val shell = service.newSession(SessionMode.SYSTEM)
+                shell.session.updateSize(80, 24)
+                val holder = if (index == 1) {
+                    TermSession(shell.id, shell.label, shell.alive, shell.session, SessionMode.LINUX, shell.tabId)
+                        .also { service.sessions[0] = it }
+                } else shell
+                service.renameSession(holder, "Workspace $index")
+                holder
+            }.also { service.selectedSessionId.value = it.first().id }
+        }
+        fun assertTabControls(holder: TermSession, activity: ActivityScenario<MainActivity>) {
+            val name = onMain { holder.displayName }
+            val minimumTouchPixels = onMain { 47 * context.resources.displayMetrics.density }
+            val deadline = android.os.SystemClock.uptimeMillis() + 10000
+            var fullyVisible = false
+            while (!fullyVisible && android.os.SystemClock.uptimeMillis() < deadline) {
+                fullyVisible = device.findObject(By.text(name))?.visibleBounds?.width()?.let { it > 0 } == true &&
+                    listOf("Tab options for $name", "Close tab $name").all { description ->
+                        device.findObject(By.desc(description))?.visibleBounds?.let {
+                            it.width() >= minimumTouchPixels && it.height() >= minimumTouchPixels
+                        } == true
+                    }
+                if (!fullyVisible) android.os.SystemClock.sleep(20)
+            }
+            assertTrue("Selected tab label and full touch targets are visible: $name", fullyVisible)
+            assertVisible(activity, holder, "Revealing a tab must preserve its terminal")
+        }
+        try {
+            device.executeShellCommand("wm density 320")
+            device.executeShellCommand("wm size 720x1500")
+            ActivityScenario.launch(MainActivity::class.java).use { activity ->
+                find("Text / voice")
+                fun hideKeyboard() = activity.onActivity {
+                    (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .hideSoftInputFromWindow(it.window.decorView.windowToken, 0)
+                }
+                hideKeyboard()
+                assertTabControls(fixtures.first(), activity)
+                onMain { service.selectedSessionId.value = fixtures.last().id }
+                assertTabControls(fixtures.last(), activity)
+                // Scrolling to older tabs is still allowed while a distant tab is selected.
+                androidx.test.uiautomator.UiScrollable(androidx.test.uiautomator.UiSelector().scrollable(true))
+                    .setAsHorizontalList().scrollToBeginning(20)
+                find(fixtures.first().displayName).click()
+                waitFor("first tab selected") { service.selectedSessionId.value == fixtures.first().id }
+                assertTabControls(fixtures.first(), activity)
+                onMain { service.moveSession(fixtures.first(), service.sessions.lastIndex) }
+                assertTabControls(fixtures.first(), activity)
+                activity.recreate()
+                find("Text / voice")
+                hideKeyboard()
+                assertTabControls(fixtures.first(), activity)
+                device.executeShellCommand("wm size 1680x1800")
+                find("WORKSPACES")
+                hideKeyboard()
+                assertTabControls(fixtures.first(), activity)
+                onMain { service.selectedSessionId.value = fixtures[1].id }
+                assertTabControls(fixtures[1], activity)
+                onMain { service.selectedSessionId.value = fixtures.first().id }
+                assertTabControls(fixtures.first(), activity)
+                val shots = File(context.filesDir, "screenshots").apply { mkdirs() }
+                device.waitForIdle()
+                assertTrue(device.takeScreenshot(File(shots, "selected-tab-sidebar.png")))
+                device.executeShellCommand("wm size 720x1500")
+                assertTrue(device.wait(Until.gone(By.text("WORKSPACES")), 10000))
+                hideKeyboard()
+                assertTabControls(fixtures.first(), activity)
+                device.waitForIdle()
+                assertTrue(device.takeScreenshot(File(shots, "selected-tab-cover.png")))
+                onMain { assertTrue(fixtures.all { it.alive.value }) }
+                assertTrue("Completed tab reveals are retrievable without logging terminal content",
+                    DiagnosticLog.read(context).lineSequence().filter { it.isNotBlank() }.any {
+                        val event = org.json.JSONObject(it)
+                        event.optString("event") == "active_tab_revealed" &&
+                            event.optString("tab") == fixtures.first().tabId
+                    })
+            }
+        } finally {
+            device.executeShellCommand("wm size ${originalSize.ifEmpty { "reset" }}")
+            device.executeShellCommand("wm density ${originalDensity.ifEmpty { "reset" }}")
+            onMain { service.sessions.toList().forEach(service::closeSession) }
+        }
+    }
+
     @Test fun longPressTabMenuManagesTheTab() {
         assumeTrue(
             "Run the tab fixture only on an isolated emulator",

@@ -26,6 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,6 +39,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -795,6 +799,8 @@ private fun TabRail(
     onSettings: () -> Unit,
 ) {
     var menuFor by remember { mutableStateOf<Int?>(null) }
+    var railSize by remember { mutableStateOf(IntSize.Zero) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val tabs: @Composable () -> Unit = {
             sessions.forEachIndexed { i, holder ->
               key(holder.id) { Box {
@@ -802,8 +808,21 @@ private fun TabRail(
                 val alive = holder.alive.value
                 val accent = holder.accent()
                 val active = i == activeIndex
+                val tabVisibility = remember { BringIntoViewRequester() }
+                var tabSize by remember { mutableStateOf(IntSize.Zero) }
+                // Selection, reorder and folding can move the active tab outside the
+                // viewport. Reveal it after layout; ordinary manual scrolling stays free.
+                LaunchedEffect(active, i, sidebar, tabSize, railSize) {
+                    if (active && tabSize != IntSize.Zero && railSize != IntSize.Zero) {
+                        withFrameNanos { }
+                        tabVisibility.bringIntoView()
+                        DiagnosticLog.record(context, "workspace", "active_tab_revealed", tabId = holder.tabId)
+                    }
+                }
                 Column(
                     modifier = Modifier
+                        .bringIntoViewRequester(tabVisibility)
+                        .onSizeChanged { tabSize = it }
                         .then(if (sidebar) Modifier.fillMaxWidth() else Modifier.width(IntrinsicSize.Max))
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (active) RailBg else RailSurface)
@@ -847,7 +866,8 @@ private fun TabRail(
               } }
             }
     }
-    Column(Modifier.fillMaxWidth().then(if (sidebar) Modifier.fillMaxHeight() else Modifier).background(RailSurfaceAlt)) {
+    Column(Modifier.fillMaxWidth().then(if (sidebar) Modifier.fillMaxHeight() else Modifier)
+        .onSizeChanged { railSize = it }.background(RailSurfaceAlt)) {
         if (sidebar) {
             Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.padding(14.dp))
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
