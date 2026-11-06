@@ -156,12 +156,14 @@ class TabMenuUiTest {
             val deadline = android.os.SystemClock.uptimeMillis() + 10000
             var fullyVisible = false
             while (!fullyVisible && android.os.SystemClock.uptimeMillis() < deadline) {
-                fullyVisible = device.findObject(By.text(name))?.visibleBounds?.width()?.let { it > 0 } == true &&
-                    listOf("Tab options for $name", "Close tab $name").all { description ->
-                        device.findObject(By.desc(description))?.visibleBounds?.let {
-                            it.width() >= minimumTouchPixels && it.height() >= minimumTouchPixels
-                        } == true
-                    }
+                fullyVisible = freshUiRead {
+                    device.findObject(By.text(name))?.visibleBounds?.width()?.let { it > 0 } == true &&
+                        listOf("Tab options for $name", "Close tab $name").all { description ->
+                            device.findObject(By.desc(description))?.visibleBounds?.let {
+                                it.width() >= minimumTouchPixels && it.height() >= minimumTouchPixels
+                            } == true
+                        }
+                }
                 if (!fullyVisible) android.os.SystemClock.sleep(20)
             }
             assertTrue("Selected tab label and full touch targets are visible: $name", fullyVisible)
