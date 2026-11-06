@@ -66,23 +66,38 @@ class TabMenuUiTest {
         assertSame(why, onMain { holder.session }, visibleSession(activity))
     }
 
+    private fun <T> freshUiRead(read: () -> T): T {
+        val deadline = android.os.SystemClock.uptimeMillis() + 10000
+        while (true) {
+            if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
+            try {
+                return read()
+            } catch (stale: androidx.test.uiautomator.StaleObjectException) {
+                if (android.os.SystemClock.uptimeMillis() >= deadline) throw stale
+            }
+        }
+    }
+
     private fun findTab(tabText: String): UiObject2 {
         device.waitForIdle()
-        device.findObject(By.text(tabText))?.let { return it }
+        freshUiRead { device.findObject(By.text(tabText)) }?.let { return it }
         // Other workspace rows also scroll. Target the named tab rail, and
         // scroll a background tab into view without selecting a different PTY.
         val trace = mutableListOf<String>()
         val vertical = device.hasObject(By.text("WORKSPACES"))
-        // UiScrollable stops when its legacy scroll-event heuristic says "end",
-        // even though Compose still exposes off-screen tabs. Drive real gestures
-        // and inspect each resulting viewport instead of trusting that heuristic.
+        // Drive real gestures and refresh Compose accessibility nodes after
+        // each viewport change; cached nodes can be stale on API 34. Readback
+        // retries never repeat input or weaken the visible-target assertions.
         for (towardStart in listOf(true, false)) {
             repeat(24) {
-                device.findObject(By.text(tabText))?.let { return it }
-                val rail = device.findObject(By.desc("Session tabs"))
-                    ?: throw AssertionError("Session tab rail is missing")
-                val b = rail.visibleBounds
-                val before = rail.findObjects(By.clazz("android.widget.TextView")).map { it.text }
+                freshUiRead { device.findObject(By.text(tabText)) }?.let { return it }
+                val b = freshUiRead {
+                    device.findObject(By.desc("Session tabs"))?.visibleBounds
+                } ?: throw AssertionError("Session tab rail is missing")
+                val before = freshUiRead {
+                    device.findObject(By.desc("Session tabs"))
+                        ?.findObjects(By.clazz("android.widget.TextView"))?.map { it.text }
+                }
                 val near = if (vertical) b.top + b.height() / 5 else b.left + b.width() / 5
                 val far = if (vertical) b.bottom - b.height() / 5 else b.right - b.width() / 5
                 val start = if (towardStart) near else far
@@ -90,8 +105,10 @@ class TabMenuUiTest {
                 if (vertical) device.swipe(b.centerX(), start, b.centerX(), end, 30)
                 else device.swipe(start, b.centerY(), end, b.centerY(), 30)
                 device.waitForIdle()
-                val after = device.findObject(By.desc("Session tabs"))
-                    ?.findObjects(By.clazz("android.widget.TextView"))?.map { it.text }
+                val after = freshUiRead {
+                    device.findObject(By.desc("Session tabs"))
+                        ?.findObjects(By.clazz("android.widget.TextView"))?.map { it.text }
+                }
                 trace += "towardStart=$towardStart before=$before after=$after"
             }
         }
