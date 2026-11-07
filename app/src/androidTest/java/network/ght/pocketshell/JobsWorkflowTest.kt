@@ -85,6 +85,7 @@ class JobsWorkflowTest {
             }
         }
         waitFor("Job records did not load") { main { state.loaded } }
+        var resultAction: android.app.PendingIntent? = null
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 main { service.workbench.page = WorkbenchState.Page.JOBS }
@@ -121,12 +122,7 @@ class JobsWorkflowTest {
                 assertEquals(command, saved.command)
                 assertEquals(requireNotNull(saved.observation).resultKey, saved.notifiedResult)
 
-                main { service.workbench.close() }
-                notification.notification.contentIntent.send()
-                text("Remote jobs")
-                scroll("Failed · exit 7")
-                val screenshotDir = File(context.filesDir, "screenshots").apply { mkdirs() }
-                device.takeScreenshot(File(screenshotDir, "remote-jobs-result.png"))
+                resultAction = notification.notification.contentIntent
 
                 val freshScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
                 val restored = main { JobsWorkbench(context, freshScope).apply { available = { true }; request = { _, script, timeout -> fixture(script, timeout) } } }
@@ -141,8 +137,20 @@ class JobsWorkflowTest {
                 } finally { main { restored.close(); freshScope.cancel() } }
                 manager.cancel(job.id, 2001)
             }
+            // Finish the scenario-owned Activity before an external notification opens a new one.
+            // ActivityScenario otherwise loses lifecycle matching when onNewIntent changes its launch intent.
+            main { service.workbench.close() }
+            requireNotNull(resultAction).send()
+            text("Remote jobs")
+            scroll("Failed · exit 7")
+            val screenshotDir = File(context.filesDir, "screenshots").apply { mkdirs() }
+            device.takeScreenshot(File(screenshotDir, "remote-jobs-result.png"))
         } finally {
-            main { state.jobs.toList().forEach { state.setWatching(it, false) }; service.workbench.close(); service.sessions.toList().forEach(service::closeSession) }
+            main {
+                androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)
+                    .filterIsInstance<MainActivity>().toList().forEach { it.finish() }
+                state.jobs.toList().forEach { state.setWatching(it, false) }; service.workbench.close(); service.sessions.toList().forEach(service::closeSession) }
             waitFor("Watch records did not settle") { main { !state.busy } }
             main { state.timeoutInput = previousTimeout.toString(); state.intervalInput = previousInterval.toString(); state.applySettings() }
             if (previous == null) recordFile.delete() else recordFile.writeBytes(previous)
