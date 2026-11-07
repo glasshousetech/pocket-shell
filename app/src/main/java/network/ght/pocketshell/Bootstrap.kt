@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import android.system.Os
+import android.system.OsConstants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
@@ -25,6 +26,8 @@ import java.util.concurrent.TimeUnit
  */
 object Bootstrap {
     private const val TAG = "PocketShell.Bootstrap"
+    // Full package sets can take many minutes on slower devices and networks.
+    private const val PACKAGE_TIMEOUT_SECONDS = 3600L
 
     suspend fun install(context: Context, distro: Distro, onStatus: (String) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -118,8 +121,11 @@ object Bootstrap {
         }
     }
 
-    private fun rootfsDirExists(context: Context, distro: Distro): Boolean =
-        File(Userland.rootfsDir(context, distro), "bin/sh").exists()
+    private fun rootfsDirExists(context: Context, distro: Distro): Boolean = runCatching {
+        // Guest absolute symlinks resolve inside proot, not Android's filesystem.
+        val mode = Os.lstat(File(Userland.rootfsDir(context, distro), "bin/sh").absolutePath).st_mode
+        OsConstants.S_ISREG(mode) || OsConstants.S_ISLNK(mode)
+    }.getOrDefault(false)
 
     /** Streams [url] to [dest] while computing its SHA-256; returns the hex digest. */
     private fun download(url: String, dest: File, onProgress: (Int) -> Unit): String {
@@ -205,7 +211,8 @@ object Bootstrap {
                 "${Userland.ubuntuApt()} --fix-broken --no-remove install -y && " +
                 "${Userland.ubuntuApt()} install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
         }
-        runGuest(context, distro, command, if (distro == Distro.Ubuntu) 600 else 240)
+        DiagnosticLog.record(context, "linux", "core_install_started", distro.id)
+        runGuest(context, distro, command, PACKAGE_TIMEOUT_SECONDS)
     }
 
     private fun provisionToolkit(context: Context, distro: Distro) {
@@ -215,7 +222,8 @@ object Bootstrap {
                 "python3 python3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less " +
                 "nodejs npm build-essential procps && rm -rf /var/lib/apt/lists/*"
         }
-        runGuest(context, distro, command, 420)
+        DiagnosticLog.record(context, "linux", "toolkit_install_started", distro.id)
+        runGuest(context, distro, command, PACKAGE_TIMEOUT_SECONDS)
     }
 
     private fun ensureIdentitySync(context: Context, distro: Distro) = synchronized(SshKeyStore.identityLock) {
@@ -269,16 +277,27 @@ object Bootstrap {
         // Keep the *tail* of the guest output: apt/dpkg print thousands of
         // progress lines and the failure is always at the end.
         val tail = GuestOutputTail(maxChars = 24_000)
+        val readFailure = java.util.concurrent.atomic.AtomicReference<java.io.IOException?>()
         val reader = Thread {
-            proc.inputStream.bufferedReader().useLines { lines -> lines.forEach(tail::append) }
+            readFailure.set(tail.drain(proc.inputStream))
         }.apply { isDaemon = true; start() }
         val output = tail
         if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
-            reader.join(2_000)
+            reader.join(5_000)
+            DiagnosticLog.record(context, "linux", "process_timeout", "seconds=$timeoutSeconds")
             throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
         }
-        reader.join(2_000)
+        reader.join(5_000)
+        if (reader.isAlive) {
+            runCatching { proc.inputStream.close() }
+            DiagnosticLog.record(context, "linux", "process_output_incomplete")
+            throw IllegalStateException("Linux output did not finish after the command exited. Setup was not marked complete.")
+        }
+        readFailure.get()?.let { failure ->
+            DiagnosticLog.record(context, "linux", "process_output_failed", failure.javaClass.simpleName)
+            throw IllegalStateException("Linux output was interrupted (exit " + proc.exitValue() + "). Setup was not marked complete.", failure)
+        }
         if (proc.exitValue() != 0) {
             throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.toString().takeLast(2_500)}")
         }

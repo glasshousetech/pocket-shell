@@ -31,4 +31,27 @@ class GuestOutputTailTest {
         tail.append("a very long final line")
         assertEquals("a very long final line\n", tail.toString())
     }
+    @Test
+    fun interruptedSubprocessOutputReachesCallerWithoutUncaughtReaderCrash() {
+        val expected = java.io.InterruptedIOException("closed fixture pipe")
+        val broken = object : java.io.InputStream() {
+            override fun read(): Int = throw expected
+        }
+        val result = java.util.concurrent.atomic.AtomicReference<java.io.IOException?>()
+        val uncaught = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val reader = Thread { result.set(GuestOutputTail(100).drain(broken)) }
+        reader.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, failure -> uncaught.set(failure) }
+        reader.start()
+        reader.join(5_000)
+        assertFalse(reader.isAlive)
+        assertEquals(expected, result.get())
+        assertEquals(null, uncaught.get())
+    }
+
+    @Test
+    fun normalSubprocessOutputRemainsCompleteAndReportsNoReadFailure() {
+        val tail = GuestOutputTail(100)
+        assertEquals(null, tail.drain("ready\ncomplete\n".byteInputStream()))
+        assertEquals("ready\ncomplete\n", tail.toString())
+    }
 }

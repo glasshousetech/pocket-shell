@@ -1,5 +1,22 @@
+diff --git a/src/tracee/event.c b/src/tracee/event.c
+index 638056e..6813272 100644
+--- a/src/tracee/event.c
++++ b/src/tracee/event.c
+@@ -345,6 +345,12 @@ int event_loop()
+ 
+ 		tracee->running = false;
+ 
++		/* Fix up the registers of a new child at its first
++		 * stop (see attach_child()), before anything looks at
++		 * them, its ptracer included.  */
++		if (WIFSTOPPED(tracee_status))
++			restore_child_regs_after_seccomp(tracee);
++
+ 		status = notify_extensions(tracee, NEW_STATUS, tracee_status, 0);
+ 		if (status != 0)
+ 			continue;
 diff --git a/src/tracee/reg.c b/src/tracee/reg.c
-index 3859f8e..70a5734 100644
+index 3859f8e..4ea1468 100644
 --- a/src/tracee/reg.c
 +++ b/src/tracee/reg.c
 @@ -301,6 +301,11 @@ int push_specific_regs(Tracee *tracee, bool including_sysnum)
@@ -14,8 +31,61 @@ index 3859f8e..70a5734 100644
  				tracee->restore_original_regs_after_seccomp_event = false;
  			}
  			/* Restore the sysarg register only if it is
+@@ -381,6 +386,40 @@ int push_regs(Tracee *tracee) {
+ 	return push_specific_regs(tracee, true);
+ }
+ 
++/**
++ * Give @child, stopped for the first time, the registers its parent
++ * had before PRoot rewrote the syscall which created it, after the
++ * outer seccomp policy rejected that syscall (see new_child()).
++ * They are restored as the parent's are at the exit stage (see
++ * push_specific_regs()), except the result register, which holds
++ * the child's own result, and the stack pointer, which is the
++ * child's own.
++ */
++void restore_child_regs_after_seccomp(Tracee *child)
++{
++	Reg reg;
++
++	if (!child->restore_regs_at_first_stop)
++		return;
++	child->restore_regs_at_first_stop = false;
++
++	if (fetch_regs(child) < 0) {
++		VERBOSE(child, 1, "vpid %" PRIu64 ": can't restore the registers of a new child",
++			child->vpid);
++		return;
++	}
++
++	for (reg = SYSARG_NUM; reg <= SYSARG_6; reg++) {
++		/* On ARM, SYSARG_1 is also the result register.  */
++		if (reg_offset[reg] != reg_offset[SYSARG_RESULT])
++			poke_reg(child, reg, peek_reg(child, ORIGINAL_SECCOMP_REWRITE, reg));
++	}
++
++	if (push_specific_regs(child, false) < 0)
++		VERBOSE(child, 1, "vpid %" PRIu64 ": can't restore the registers of a new child",
++			child->vpid);
++}
++
+ word_t get_systrap_size(Tracee *tracee) {
+ #if defined(ARCH_ARM_EABI)
+ 	/* On ARM thumb mode systrap size is 2 */
+diff --git a/src/tracee/reg.h b/src/tracee/reg.h
+index 4536388..adcf995 100644
+--- a/src/tracee/reg.h
++++ b/src/tracee/reg.h
+@@ -45,6 +45,7 @@ typedef enum {
+ extern int fetch_regs(Tracee *tracee);
+ extern int push_specific_regs(Tracee *tracee, bool including_sysnum);
+ extern int push_regs(Tracee *tracee);
++extern void restore_child_regs_after_seccomp(Tracee *child);
+ 
+ extern word_t peek_reg(const Tracee *tracee, RegVersion version, Reg reg);
+ extern void poke_reg(Tracee *tracee, Reg reg, word_t value);
 diff --git a/src/tracee/seccomp.c b/src/tracee/seccomp.c
-index e0692da..7bb2086 100644
+index e0692da..7a9c7d5 100644
 --- a/src/tracee/seccomp.c
 +++ b/src/tracee/seccomp.c
 @@ -132,6 +132,82 @@ static int handle_seccomp_event_common(Tracee *tracee)
@@ -115,24 +185,70 @@ index e0692da..7bb2086 100644
  		restart_syscall_after_seccomp(tracee);
  		break;
  
-@@ -388,6 +465,7 @@ static int handle_seccomp_event_common(Tracee *tracee)
+@@ -386,8 +463,22 @@ static int handle_seccomp_event_common(Tracee *tracee)
+ 	}
+ #endif
  
++	case PR_fork:
++		/* Backport termux/proot 9bd53079 and e2d843ee: Android rejects
++		 * musl's x86_64 fork syscall. clone(SIGCHLD, 0, 0, 0, 0)
++		 * has fork semantics; new_child restores the child's registers. */
++		set_sysnum(tracee, PR_clone);
++		poke_reg(tracee, SYSARG_1, SIGCHLD);
++		poke_reg(tracee, SYSARG_2, 0);
++		poke_reg(tracee, SYSARG_3, 0);
++		poke_reg(tracee, SYSARG_4, 0);
++		poke_reg(tracee, SYSARG_5, 0);
++		restart_syscall_after_seccomp(tracee);
++		break;
++
  	case PR_set_robust_list:
  	default:
 +		print_current_regs(tracee, 1, "unhandled seccomp SIGSYS");
  		/* Set errno to -ENOSYS */
  		set_result_after_seccomp(tracee, -ENOSYS);
  	}
+diff --git a/src/tracee/tracee.c b/src/tracee/tracee.c
+index e83584d..4d72a97 100644
+--- a/src/tracee/tracee.c
++++ b/src/tracee/tracee.c
+@@ -428,6 +428,14 @@ int new_child(Tracee *parent, word_t clone_flags)
+ 	child->verbose = parent->verbose;
+ 	child->seccomp = parent->seccomp;
+ 	child->sysexit_pending = parent->sysexit_pending;
++	/* The pinned runtime registers children synchronously in new_child,
++	 * rather than upstream's separate attach_child. Preserve the same
++	 * first-stop restoration for a seccomp-rewritten fork. */
++	if (parent->restore_original_regs_after_seccomp_event) {
++		child->_regs[ORIGINAL_SECCOMP_REWRITE] = parent->_regs[ORIGINAL_SECCOMP_REWRITE];
++		child->restore_regs_at_first_stop = true;
++	}
++
+ #ifdef HAS_POKEDATA_WORKAROUND
+ 	child->pokedata_workaround_stub_addr = parent->pokedata_workaround_stub_addr;
+ #endif
+@@ -560,6 +568,9 @@ int new_child(Tracee *parent, word_t clone_flags)
+ 
+ 		child->sigstop = SIGSTOP_ALLOWED;
+ 
++		/* This pending SIGSTOP is the child's first stop. */
++		restore_child_regs_after_seccomp(child);
++
+ 		/* Notify its ptracer if it is ready to be traced.  */
+ 		if (child->as_ptracee.ptracer != NULL) {
+ 			/* Sanity check.  */
 diff --git a/src/tracee/tracee.h b/src/tracee/tracee.h
-index ef87540..7883b3c 100644
+index ef87540..74a8b36 100644
 --- a/src/tracee/tracee.h
 +++ b/src/tracee/tracee.h
-@@ -160,6 +160,8 @@ typedef struct tracee {
+@@ -160,6 +160,10 @@ typedef struct tracee {
  	bool _regs_were_changed;
  	bool restore_original_regs;
  	bool restore_original_regs_after_seccomp_event;
 +	/* Pending F_GETFD validation for a seccomp-rewritten dup2(fd, fd). */
 +	bool seccomp_dup2_same_fd;
++	/* Restore the original fork registers at the child's first stop. */
++	bool restore_regs_at_first_stop;
  
  	/* State for the special handling of SIGSTOP.  */
  	enum {

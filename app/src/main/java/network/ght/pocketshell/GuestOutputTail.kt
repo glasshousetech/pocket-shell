@@ -19,6 +19,14 @@ class GuestOutputTail(private val maxChars: Int) {
         }
     }
 
+    /** Return pipe failures to the command owner; an interrupted reader must not crash the app. */
+    fun drain(input: java.io.InputStream): java.io.IOException? = try {
+        input.bufferedReader().useLines { lines -> lines.forEach(::append) }
+        null
+    } catch (failure: java.io.IOException) {
+        failure
+    }
+
     @Synchronized
     override fun toString(): String =
         if (lines.isEmpty()) "" else lines.joinToString(separator = "\n", postfix = "\n")
