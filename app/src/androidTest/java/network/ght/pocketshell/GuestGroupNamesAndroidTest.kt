@@ -30,12 +30,15 @@ class GuestGroupNamesAndroidTest {
     fun inheritedGroupsResolveBeforeCommandsAndPtyStartup() = verifyGuest(Distro.Ubuntu)
 
     @Test
-    fun alpineGroupsAndCompleteToolkitInstallWork() = verifyGuest(Distro.Alpine)
+    fun alpineGroupsAndCompleteToolkitInstallWork() = verifyGuest(Distro.Alpine, checkPty = false, checkToolkit = true)
 
     @Test
-    fun commandTimeoutIsRecoverableAndPreservesNextCommand() = verifyGuest(Distro.Ubuntu, checkTimeout = true)
+    fun commandTimeoutIsRecoverableAndPreservesNextCommand() = verifyGuest(Distro.Ubuntu, checkTimeout = true, checkPty = false)
 
-    private fun verifyGuest(distro: Distro, checkTimeout: Boolean = false) {
+    @Test
+    fun alpinePtyRetainsFinalOutput() = verifyGuest(Distro.Alpine)
+
+    private fun verifyGuest(distro: Distro, checkTimeout: Boolean = false, checkPty: Boolean = true, checkToolkit: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val realContext = instrumentation.targetContext
         val fixture = File(realContext.cacheDir, "group-name-test-" + UUID.randomUUID()).apply { mkdirs() }
@@ -141,23 +144,26 @@ class GuestGroupNamesAndroidTest {
             assertFalse(repeated.output, repeated.output.contains("cannot find name for group ID"))
             assertEquals(mappedGroups, File(root, "etc/group").readText())
 
-            val finished = CountDownLatch(1)
-            val transcript = AtomicReference("")
-            instrumentation.runOnMainSync {
-                terminal = TermCore.newSession(context, SessionMode.LINUX,
-                    startupCommand = "test -t 0 && printf 'GROUP_PTY_READY\\n'; groups; printf 'GROUP_PTY_DONE\\n'",
-                    onRedraw = { transcript.set(it.emulator?.screen?.transcriptText.orEmpty()) },
-                    onTitle = {},
-                    onFinished = {
-                        transcript.set(it.emulator?.screen?.transcriptText.orEmpty())
-                        finished.countDown()
-                    })
-                terminal!!.updateSize(120, 40)
+            if (checkPty) {
+                val finished = CountDownLatch(1)
+                val transcript = AtomicReference("")
+                instrumentation.runOnMainSync {
+                    terminal = TermCore.newSession(context, SessionMode.LINUX,
+                        startupCommand = "test -t 0 && printf 'GROUP_PTY_READY\\n'; groups; printf 'GROUP_PTY_DONE\\n'",
+                        onRedraw = { transcript.set(it.emulator?.screen?.transcriptText.orEmpty()) },
+                        onTitle = {},
+                        onFinished = {
+                            transcript.set(it.emulator?.screen?.transcriptText.orEmpty())
+                            finished.countDown()
+                        })
+                    terminal!!.updateSize(120, 40)
+                }
+                assertTrue("Owned PTY did not finish", finished.await(90, TimeUnit.SECONDS))
+                assertTrue(transcript.get(), transcript.get().contains("GROUP_PTY_READY"))
+                assertTrue(transcript.get(), transcript.get().contains("GROUP_PTY_DONE"))
+                assertFalse(transcript.get(), transcript.get().contains("cannot find name for group ID"))
+
             }
-            assertTrue("Owned PTY did not finish", finished.await(90, TimeUnit.SECONDS))
-            assertTrue(transcript.get(), transcript.get().contains("GROUP_PTY_READY"))
-            assertTrue(transcript.get(), transcript.get().contains("GROUP_PTY_DONE"))
-            assertFalse(transcript.get(), transcript.get().contains("cannot find name for group ID"))
 
             if (checkTimeout) {
                 // Exercise the production timeout path; an interrupted pipe reader must
@@ -187,7 +193,7 @@ class GuestGroupNamesAndroidTest {
             val exported = DiagnosticLog.read(context)
             assertTrue(exported, exported.contains("android_group_registered"))
             assertFalse(exported, exported.contains("owned-storage-probe"))
-            if (distro == Distro.Alpine) {
+            if (checkToolkit) {
                 Bootstrap::class.java.getDeclaredMethod("configure", Context::class.java, File::class.java, Distro::class.java)
                     .apply { isAccessible = true }.invoke(Bootstrap, context, root, distro)
                 val packageProbe = execute(context, Userland.prootExecArgs(context, distro,
@@ -215,7 +221,7 @@ class GuestGroupNamesAndroidTest {
                 }
             }
             println("GROUP_NAME_FIXTURE abi=" + abi + " numeric=" + numericGroups +
-                " registered=" + events.size + " pty=true repeatedExit=" + repeated.code)
+                " registered=" + events.size + " pty=" + checkPty + " repeatedExit=" + repeated.code)
             println("GROUP_NAME_BASELINE " + baseline.output.replace("\n", "\\n"))
             println("GROUP_NAME_FIXED " + fixed.output.replace("\n", "\\n"))
         } finally {
