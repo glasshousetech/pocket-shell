@@ -18,7 +18,7 @@ class CommandEditText(context: Context) : EditText(context) {
     init {
         inputType = inputFlags(false)
         transformationMethod = null
-        imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_ENTER_ACTION
+        imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_ENTER_ACTION
         gravity = Gravity.TOP or Gravity.START
     }
 

@@ -20,6 +20,7 @@ class CommandEditorTest {
                 val connection = editor.onCreateInputConnection(info)!!
                 assertEquals(0, info.inputType and caps)
                 assertEquals(0, info.initialCapsMode)
+                assertNotEquals(0, info.imeOptions and EditorInfo.IME_FLAG_NO_FULLSCREEN)
                 assertEquals(0, connection.getCursorCapsMode(caps))
                 assertNotEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, info.inputType and InputType.TYPE_MASK_VARIATION)
                 connection.closeConnection()

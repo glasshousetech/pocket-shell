@@ -210,7 +210,12 @@ class TerminalWorkspaceUiTest {
                 device.takeScreenshot(File(dir, "workspace-landscape.png"))
                 device.findObject(By.text("Text / voice")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
-                assertTrue("Close stays reachable above the keyboard", device.wait(Until.hasObject(By.text("Close")), 4000))
+                val closeVisible = device.wait(Until.hasObject(By.text("Close")), 4000)
+                if (!closeVisible) {
+                    device.takeScreenshot(File(dir, "editor-landscape-failure.png"))
+                    device.dumpWindowHierarchy(File(dir, "editor-landscape-failure.xml"))
+                }
+                assertTrue("Close stays reachable above the keyboard", closeVisible)
                 device.waitForIdle()
                 device.takeScreenshot(File(dir, "text-voice-landscape.png"))
                 device.findObject(By.text("Close")).click()
