@@ -111,6 +111,8 @@ class SftpBehaviorTest {
         val direct = FileTransport.command(profile(), 400)
         assertTrue(direct.contains("ssh -T -s "))
         assertTrue(direct.contains("StrictHostKeyChecking=yes"))
+        File("build/workspaces").mkdirs()
+        File("build/workspaces/relay-sftp.sh").writeText(FileTransport.relayScript("agent-prod", 120))
         val relay = FileTransport.command(profile().copy(remoteCommand = "~/.local/bin/ght-hop agent-prod"), 400)
         assertTrue(relay.contains("ght-agents"))
         assertTrue(relay.contains(" -s -- "))

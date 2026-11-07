@@ -34,6 +34,7 @@ fun WorkbenchDialog(
     service: TermService,
     onConnect: (SshProfile) -> Unit,
     onResumeWorkspace: (SshProfile, RemoteWorkspace) -> Unit,
+    onJobOutput: (RemoteJob) -> Unit,
     onAction: (String) -> Unit,
     onRefreshOutput: () -> Unit,
     onInsert: (String) -> Unit,
@@ -47,6 +48,7 @@ fun WorkbenchDialog(
         WorkbenchState.Page.DIAGNOSIS -> "Connection check"
         WorkbenchState.Page.WORKSPACES -> "Remote workspaces"
         WorkbenchState.Page.FILES -> "Remote files"
+        WorkbenchState.Page.JOBS -> "Remote jobs"
     }
     Dialog(onDismissRequest = state::close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -71,6 +73,7 @@ fun WorkbenchDialog(
                             WorkbenchState.Page.DIAGNOSIS -> DiagnosisPanel(service)
                             WorkbenchState.Page.WORKSPACES -> RemoteWorkspacePanel(service, onConnect, onResumeWorkspace)
                             WorkbenchState.Page.FILES -> FilesPanel(service)
+                            WorkbenchState.Page.JOBS -> JobsPanel(service, onJobOutput)
                         }
                     }
                 }
@@ -87,6 +90,7 @@ fun WorkbenchDialog(
         "Connection check" to "Diagnose SSH without changing server trust",
         "Remote workspaces" to "Resume a running session or hand it to your PC",
         "Remote files" to "Browse, upload and download with verified results",
+        "Remote jobs" to "Run server commands and return for their results",
         "Connections" to "Open or edit your server library",
         "New tab" to "Start another Linux terminal",
         "Text / voice" to "Review a draft before inserting",

@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             serviceState.value = (binder as? TermService.LocalBinder)?.service
+            openRequestedTool()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             serviceState.value = null
@@ -116,6 +117,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun openRequestedTool() {
+        if (intent?.action == JobsWorkbench.OPEN_JOBS && serviceState.value != null) {
+            serviceState.value?.openWorkbench(WorkbenchState.Page.JOBS)
+            intent.action = null
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        serviceState.value?.takeIf { it.workbench.page == WorkbenchState.Page.JOBS }?.jobs?.refresh()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openRequestedTool()
     }
 
     override fun onDestroy() {
@@ -502,6 +521,13 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     if (service.workbench.page != null) {
         WorkbenchDialog(service,
             onConnect = ::connect,
+            onJobOutput = { job ->
+                runCatching {
+                    val holder = service.newSession(SessionMode.LINUX, startupCommand = "exec " + RemoteJobs.command(job.profile, RemoteJobs.outputScript(job), interactive = true), customName = job.name + " output")
+                    service.selectedSessionId.value = holder.id
+                    service.workbench.close()
+                }.onFailure { service.workbench.error = it.message ?: "Could not open job output." }
+            },
             onResumeWorkspace = { profile, workspace ->
                 if (Userland.installedDistro(ctx) == null) {
                     service.workbench.error = "Install Linux in Settings before opening a remote workspace."
@@ -540,6 +566,11 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     }
                     "Saved commands" -> { state.page = WorkbenchState.Page.COMMANDS; state.error = null }
                     "Connection check" -> { state.page = WorkbenchState.Page.DIAGNOSIS; state.error = null }
+                    "Remote jobs" -> {
+                        if (service.jobs.profile == null) service.jobs.profile = sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile
+                            ?: SshShortcuts.profile(SshShortcuts.machines.first { it.id == "agent-prod" })
+                        state.page = WorkbenchState.Page.JOBS; state.error = null
+                    }
                     "Remote files" -> {
                         if (service.files.profile == null) sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile?.let(service.files::choose)
                         state.page = WorkbenchState.Page.FILES; state.error = null

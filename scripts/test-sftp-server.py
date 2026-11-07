@@ -24,6 +24,22 @@ class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-with Server(("127.0.0.1", 48372), Handler) as server:
-    print("SFTP fixture ready", flush=True)
-    server.serve_forever()
+
+# Separate loopback port for instrumentation to exercise the real generated Linux job scripts.
+# This helper is only launched inside an ephemeral CI runner with synthetic HOME.
+import json
+import threading
+class JobHandler(socketserver.StreamRequestHandler):
+    def handle(self):
+        data=json.loads(self.rfile.readline())
+        script=data["script"]
+        environment=dict(os.environ, HOME=str(root))
+        result=subprocess.run(["sh","-c",script], cwd=root, env=environment,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
+        self.wfile.write((json.dumps({"exit":result.returncode,"output":result.stdout})+"\n").encode())
+with Server(("127.0.0.1", 48373), JobHandler) as jobs:
+    thread=threading.Thread(target=jobs.serve_forever,daemon=True)
+    thread.start()
+    with Server(("127.0.0.1", 48372), Handler) as server:
+        print("SFTP and jobs fixtures ready", flush=True)
+        server.serve_forever()
