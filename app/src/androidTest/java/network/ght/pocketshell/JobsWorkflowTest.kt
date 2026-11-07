@@ -153,9 +153,24 @@ class JobsWorkflowTest {
             // A synthetic PendingIntent.send from the background is correctly blocked by Android.
             main { service.workbench.close() }
             device.openNotification()
-            text("Native job verification")
+            val notificationTitle = text("Native job verification")
+            // Android's collapsed automatic group exposes a hybrid title whose tap
+            // opens the app's launcher, not the child's content PendingIntent.
+            if (notificationTitle.resourceName == "com.android.systemui:id/notification_title") {
+                var ancestor: UiObject2? = notificationTitle.parent
+                var expand: UiObject2? = null
+                while (ancestor != null && expand == null) {
+                    expand = ancestor.findObject(By.res("android", "expand_button"))
+                    ancestor = ancestor.parent
+                }
+                checkNotNull(expand) { "Grouped job notification has no expand control" }.click()
+            }
+            val notificationBody = text("Exited with code 7 on Linux job fixture")
+            val notificationEvidence = File(context.filesDir, "screenshots").apply { mkdirs() }
+            device.dumpWindowHierarchy(File(notificationEvidence, "jobs-notification.xml"))
+            device.takeScreenshot(File(notificationEvidence, "jobs-notification.png"))
             demoBeat("notification")
-            text("Native job verification").click()
+            notificationBody.click()
             text("Remote jobs")
             text("Failed · exit 7")
             val screenshotDir = File(context.filesDir, "screenshots").apply { mkdirs() }
