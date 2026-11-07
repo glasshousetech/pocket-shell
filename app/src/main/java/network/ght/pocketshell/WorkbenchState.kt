@@ -5,7 +5,7 @@ import java.util.UUID
 
 /** UI drafts stay with the live service, never in saved-instance Bundles or diagnostic logs. */
 class WorkbenchState {
-    enum class Page { PALETTE, COMMANDS, OUTPUT, DIAGNOSIS, WORKSPACES }
+    enum class Page { PALETTE, COMMANDS, OUTPUT, DIAGNOSIS, WORKSPACES, FILES }
     var page by mutableStateOf<Page?>(null)
     var query by mutableStateOf("")
     var commands by mutableStateOf<List<SavedCommand>>(emptyList())

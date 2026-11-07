@@ -22,7 +22,7 @@ class SshShortcutsTest {
     @Test
     fun everyMachineHasAUniqueHopTargetAndAliases() {
         val ids = SshShortcuts.machines.map { it.id }
-        assertEquals(listOf("alientop", "mob", "dev", "deploy", "sfo"), ids)
+        assertEquals(listOf("agent-prod", "agent-01", "public-01", "alientop", "mob", "dev", "deploy", "sfo"), ids)
         val aliases = SshShortcuts.machines.flatMap { it.aliases }
         assertEquals(aliases.size, aliases.toSet().size)
         SshShortcuts.machines.forEach { SshShortcuts.profile(it).command() } // all validate

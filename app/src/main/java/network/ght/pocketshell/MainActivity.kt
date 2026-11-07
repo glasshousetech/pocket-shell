@@ -540,6 +540,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     }
                     "Saved commands" -> { state.page = WorkbenchState.Page.COMMANDS; state.error = null }
                     "Connection check" -> { state.page = WorkbenchState.Page.DIAGNOSIS; state.error = null }
+                    "Remote files" -> {
+                        if (service.files.profile == null) sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile?.let(service.files::choose)
+                        state.page = WorkbenchState.Page.FILES; state.error = null
+                    }
                     "Remote workspaces" -> {
                         if (state.workspaceProfile == null) state.workspaceProfile = sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile
                         state.page = WorkbenchState.Page.WORKSPACES; state.error = null

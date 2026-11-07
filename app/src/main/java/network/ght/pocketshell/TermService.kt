@@ -83,6 +83,8 @@ class TermService : Service() {
     private val operations = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     val workbench = WorkbenchState()
+    private val filesState = lazy { FilesWorkbench(applicationContext, operations, ::refreshNotification) }
+    val files: FilesWorkbench get() = filesState.value
 
     fun openWorkbench(page: WorkbenchState.Page = WorkbenchState.Page.PALETTE) {
         workbench.page = page
@@ -209,7 +211,8 @@ class TermService : Service() {
         linuxRemovalState.value = RemovalState.RUNNING
         sessions.toList().forEach(::closeSession)
         operations.launch {
-            val result = withContext(Dispatchers.IO) { Userland.uninstall(applicationContext) }
+            val remove: suspend () -> Result<Unit> = { withContext(Dispatchers.IO) { Userland.uninstall(applicationContext) } }
+            val result = if (filesState.isInitialized()) files.withoutTransport(remove) else remove()
             linuxRemovalState.value = if (result.isSuccess) RemovalState.REMOVED else RemovalState.FAILED
         }
     }
@@ -582,7 +585,7 @@ class TermService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_terminal)
             .setContentTitle("Pocket Shell")
-            .setContentText(if (n == 1) "1 session running" else "$n sessions running")
+            .setContentText(if (filesState.isInitialized() && files.busy) "File operation in progress · $n sessions" else if (n == 1) "1 session running" else "$n sessions running")
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(open)
@@ -614,7 +617,7 @@ class TermService : Service() {
     }
 
     private fun applyPowerPolicy() {
-        if (sessions.any { it.alive.value } && WorkspacePrefs.backgroundWork(this)) acquireWakeLock()
+        if ((sessions.any { it.alive.value } || (filesState.isInitialized() && files.busy)) && WorkspacePrefs.backgroundWork(this)) acquireWakeLock()
         else releaseWakeLock()
     }
 
@@ -626,6 +629,7 @@ class TermService : Service() {
     }
 
     override fun onDestroy() {
+        if (filesState.isInitialized()) files.close()
         operations.cancel()
         sessions.forEach { TranscriptLogger.reset(it.id) }
         snapshotHandler.removeCallbacks(snapshotTask)

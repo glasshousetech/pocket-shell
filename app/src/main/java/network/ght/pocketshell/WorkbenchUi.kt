@@ -46,6 +46,7 @@ fun WorkbenchDialog(
         WorkbenchState.Page.OUTPUT -> "Search output"
         WorkbenchState.Page.DIAGNOSIS -> "Connection check"
         WorkbenchState.Page.WORKSPACES -> "Remote workspaces"
+        WorkbenchState.Page.FILES -> "Remote files"
     }
     Dialog(onDismissRequest = state::close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -69,6 +70,7 @@ fun WorkbenchDialog(
                             WorkbenchState.Page.OUTPUT -> SearchOutput(state, onRefreshOutput)
                             WorkbenchState.Page.DIAGNOSIS -> DiagnosisPanel(service)
                             WorkbenchState.Page.WORKSPACES -> RemoteWorkspacePanel(service, onConnect, onResumeWorkspace)
+                            WorkbenchState.Page.FILES -> FilesPanel(service)
                         }
                     }
                 }
@@ -84,6 +86,7 @@ fun WorkbenchDialog(
         "Saved commands" to "Reusable commands with fill-in parameters",
         "Connection check" to "Diagnose SSH without changing server trust",
         "Remote workspaces" to "Resume a running session or hand it to your PC",
+        "Remote files" to "Browse, upload and download with verified results",
         "Connections" to "Open or edit your server library",
         "New tab" to "Start another Linux terminal",
         "Text / voice" to "Review a draft before inserting",

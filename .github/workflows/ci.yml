@@ -53,9 +53,9 @@ jobs:
 
       - name: Prepare real workspace test tools
         run: |
-          if ! command -v tmux >/dev/null || ! command -v script >/dev/null; then
+          if ! command -v tmux >/dev/null || ! command -v script >/dev/null || ! test -x /usr/lib/openssh/sftp-server; then
             sudo apt-get update
-            sudo apt-get install -y tmux util-linux
+            sudo apt-get install -y tmux util-linux openssh-sftp-server
           fi
           tmux -V
           command -v script
@@ -120,6 +120,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Start isolated file-transfer fixture
+        run: |
+          if ! test -x /usr/lib/openssh/sftp-server; then sudo apt-get update && sudo apt-get install -y openssh-sftp-server; fi
+          python3 scripts/test-sftp-server.py > sftp-fixture.log 2>&1 &
+          echo $! > sftp-fixture.pid
+
       - name: Run instrumented smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -132,13 +138,21 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -r -w -e class network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb shell am instrument -r -w -e class network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest,network.ght.pocketshell.FilesWorkflowTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
             adb logcat -d -s System.out:I PocketShell.InputTiming:D > input-timings.txt
             mkdir -p app/build/outputs/theme-screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
             tar xf app/build/outputs/theme-screenshots.tar -C app/build/outputs/theme-screenshots
             grep -Eq 'OK \([1-9][0-9]* tests?\)' instrument-output.txt
             ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE: -[234]' instrument-output.txt
+
+      - name: Stop owned file fixture
+        if: always()
+        run: |
+          if test -f sftp-fixture.pid; then
+            pid=$(cat sftp-fixture.pid)
+            if test -r /proc/$pid/cmdline && tr "\0" " " < /proc/$pid/cmdline | grep -q "scripts/test-sftp-server.py"; then kill "$pid"; fi
+          fi
 
       - name: Upload theme and terminal UI evidence
         if: always()
@@ -149,6 +163,7 @@ jobs:
             app/build/outputs/theme-screenshots
             instrument-output.txt
             input-timings.txt
+            sftp-fixture.log
           if-no-files-found: warn
 
       # Gradle prints only a pass/fail summary, so without this there is no way
