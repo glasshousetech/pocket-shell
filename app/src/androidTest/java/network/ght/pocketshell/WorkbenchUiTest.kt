@@ -213,6 +213,7 @@ class WorkbenchUiTest {
             service.sessions.toList().forEach(service::closeSession)
             service.selectedSessionId.value = null // A fresh service, before any tab is tapped.
             service.workbench.close()
+            service.workbench.query = "" // Prior test filtered its still-running service to Sibling.
             service.workbench.outputQuery = ""
             val restore = TermService::class.java.getDeclaredMethod("restoreSession", SessionStore.Saved::class.java).apply { isAccessible = true }
             fun restoreFixture(name: String, transcript: String): TermSession {
