@@ -40,11 +40,15 @@ class WorkbenchUiTest {
         fail("Timed out: " + label)
     }
 
-    private fun text(value: String): UiObject2 =
-        device.wait(Until.findObject(By.text(value)), 10000) ?: error("Not visible: " + value)
+    private fun text(value: String): UiObject2 {
+        if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
+        return device.wait(Until.findObject(By.text(value)), 10000) ?: error("Not visible: " + value)
+    }
 
-    private fun desc(value: String): UiObject2 =
-        device.wait(Until.findObject(By.desc(value)), 10000) ?: error("Not accessible: " + value)
+    private fun desc(value: String): UiObject2 {
+        if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
+        return device.wait(Until.findObject(By.desc(value)), 10000) ?: error("Not accessible: " + value)
+    }
 
     private fun fields(): List<UiObject2> {
         if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
@@ -52,12 +56,13 @@ class WorkbenchUiTest {
     }
 
     private fun beat(id: String) {
-        if (InstrumentationRegistry.getArguments().getString("demoRecording") != "true") return
         val directory = File(context.filesDir, "screenshots").apply { mkdirs() }
+        device.takeScreenshot(File(directory, "workbench-" + id + ".png"))
+        if (InstrumentationRegistry.getArguments().getString("demoRecording") != "true") return
         File(directory, "workbench-demo-timeline.jsonl").appendText(
             org.json.JSONObject().put("beat", id).put("uptimeMs", SystemClock.uptimeMillis()).toString() + "\n")
         // A deliberate on-screen reading hold for the narrated recording only.
-        SystemClock.sleep(7000)
+        SystemClock.sleep(InstrumentationRegistry.getArguments().getString("demoHoldMs", "10000").toLong())
     }
 
     @Test fun savedCommandSearchAndPaletteWorkThroughTheRealUi() {
@@ -90,6 +95,7 @@ class WorkbenchUiTest {
                 text("Actions").click()
                 text("Saved commands").click()
                 text("Add command").click()
+                text("Save command")
                 fields()[0].text = "Print a message"
                 fields()[1].text = "printf '%s\\n' {{message}}"
                 waitFor("template draft entered") { service.workbench.editing?.template == "printf '%s\\n' {{message}}" }
@@ -165,6 +171,11 @@ class WorkbenchUiTest {
                 assertTrue(logs.contains("\"component\":\"commands\""))
                 assertFalse("Command values must not enter diagnostic logs", logs.contains(value))
             }
+        } catch (failure: Throwable) {
+            val shots = File(context.filesDir, "screenshots").apply { mkdirs() }
+            device.takeScreenshot(File(shots, "workbench-failure.png"))
+            device.dumpWindowHierarchy(File(shots, "workbench-failure.xml"))
+            throw failure
         } finally {
             main { service.workbench.close(); service.sessions.toList().forEach(service::closeSession) }
             if (previous == null) library.delete() else library.writeBytes(previous)

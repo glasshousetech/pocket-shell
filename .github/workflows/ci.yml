@@ -9,6 +9,11 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      record_demo:
+        description: Record and narrate the verified native command workflow
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -147,7 +152,7 @@ jobs:
     # Manual-only: walks the app through a few real screens on a booted
     # emulator and uploads what it looked like. UI-coordinate/text automation
     # is more brittle than the smoke test above, so this never gates a push.
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.record_demo != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,4 +225,52 @@ jobs:
         with:
           name: pocketshell-screenshots
           path: app/build/outputs/screenshots
+          if-no-files-found: error
+
+  native-demo:
+    if: github.event_name == 'workflow_dispatch' && inputs.record_demo == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Prepare native recording
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - name: Record verified native workflow
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/demo/record.sh
+      - name: Narrate recorded outcomes
+        run: |
+          python3 -m pip install edge-tts==7.3.1
+          cp scripts/demo/story.json demo-output/script.json
+          python3 scripts/demo/narrate.py demo-output
+          python3 scripts/demo/render.py demo-output "${{ github.sha }}"
+      - name: Upload original recording and narrated review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-native-demo
+          path: demo-output
           if-no-files-found: error

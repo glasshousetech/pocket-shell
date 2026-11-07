@@ -80,6 +80,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Window.Callback is public Android API and receives the shortcut before
+        // either the terminal view or a text field interprets it as terminal input.
+        val previousCallback = window.callback
+        window.callback = object : android.view.Window.Callback by previousCallback {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (event.keyCode == KeyEvent.KEYCODE_P && event.isCtrlPressed && event.isShiftPressed) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                        serviceState.value?.openWorkbench()
+                    }
+                    return true
+                }
+                return previousCallback.dispatchKeyEvent(event)
+            }
+        }
         DiagnosticLog.record(this, "workspace", if (savedInstanceState == null) "activity_opened" else "activity_recreated")
         Clip.init(this)
         requestNotificationPermission()
@@ -102,15 +116,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_P && event.isCtrlPressed && event.isShiftPressed &&
-            event.action == KeyEvent.ACTION_DOWN) {
-            if (event.repeatCount == 0) serviceState.value?.openWorkbench()
-            return true
-        }
-        return super.dispatchKeyEvent(event)
     }
 
     override fun onDestroy() {
