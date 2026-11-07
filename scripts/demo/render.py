@@ -75,7 +75,7 @@ for cue in cues:
 audio_filters.append("".join(f"[a{i}]" for i in range(len(chapters))) +
                      f"amix=inputs={len(chapters)}:normalize=0,apad=whole_dur={duration},loudnorm=I=-16:TP=-1.5:LRA=11[voice]")
 (work / "title.txt").write_text("PocketShell — " + title, encoding="utf-8")
-filters = (f"trim=start={start}:end={end},setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop_duration={duration},pad=iw:ih+304:0:80:color=0x0c1424,"
+filters = (f"fps=30,trim=start={start}:end={end},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={duration},pad=iw:ih+304:0:80:color=0x0c1424,"
            "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=title.txt:fontcolor=white:fontsize=28:x=24:y=18,"
            f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Android emulator · candidate {revision[:8]}':fontcolor=0xa9bad1:fontsize=18:x=24:y=53,"
            "ass=captions.ass")

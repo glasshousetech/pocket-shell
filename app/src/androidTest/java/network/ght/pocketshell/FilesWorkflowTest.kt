@@ -43,18 +43,28 @@ class FilesWorkflowTest {
         return requireNotNull(device.findObject(By.text(label)))
     }
     private fun scrollTo(label: String): UiObject2 {
+        val selector = By.scrollable(true).pkg("network.ght.pocketshell")
         waitFor("Missing file content: " + label) {
             if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
-            device.hasObject(By.text(label)) || device.hasObject(By.scrollable(true))
+            device.hasObject(By.text(label)) || device.hasObject(selector)
         }
-        // Search both directions in small viewport steps. A large lazy-column
-        // header may contain the status above the currently visible receipts.
+        fun viewport(node: UiObject2): String = buildString {
+            append(node.text).append(node.visibleBounds)
+            node.children.forEach { append(viewport(it)) }
+        }
+        val deadline = SystemClock.uptimeMillis() + 30000
+        // Compose estimates scroll range from lazy item sizes. UIAutomator can
+        // report an edge while a long receipt still visibly moves; use observed
+        // viewport progress, not that return value, to detect the real edge.
         for (direction in listOf(Direction.UP, Direction.DOWN)) {
-            while (!device.hasObject(By.text(label))) {
-                val list = device.findObject(By.scrollable(true)) ?: break
-                val more = list.scroll(direction, 0.45f)
+            while (!device.hasObject(By.text(label)) && SystemClock.uptimeMillis() < deadline) {
+                val list = device.findObject(selector) ?: break
+                val before = viewport(list)
+                list.scroll(direction, 0.45f)
+                device.waitForIdle()
                 if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
-                if (!more) break
+                val after = device.findObject(selector)?.let(::viewport)
+                if (after == before) break
             }
             if (device.hasObject(By.text(label))) break
         }
