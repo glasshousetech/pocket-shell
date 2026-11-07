@@ -36,7 +36,7 @@
   ],
   "title": "Save, run and find",
   "fixture": "Harmless literal shell message in a native PTY",
-  "nativeTests": "OK (2 tests)",
+  "nativeTests": "OK (3 tests)",
   "timeline": "workbench-demo-timeline.jsonl",
   "holdSeconds": 10
 }

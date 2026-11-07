@@ -33,5 +33,6 @@
       "title": "Keep the terminal untouched",
       "narration": "No match? You get a clear empty result, and your terminal stays untouched."
     }
-  ]
+  ],
+  "nativeTests": "OK (3 tests)"
 }
