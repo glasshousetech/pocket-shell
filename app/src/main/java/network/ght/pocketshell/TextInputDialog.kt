@@ -2,15 +2,17 @@ package network.ght.pocketshell
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.viewinterop.AndroidView
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.inputmethod.InputMethodManager
+import android.util.TypedValue
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -24,7 +26,9 @@ fun TextInputDialog(
     onInsert: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val focus = remember { FocusRequester() }
+    val latestChange by rememberUpdatedState(onValueChange)
+    val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f).toArgb()
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -49,19 +53,48 @@ fun TextInputDialog(
                             style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(8.dp))
                     }
-                    OutlinedTextField(
-                        value = value,
-                        onValueChange = onValueChange,
-                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false).focusRequester(focus),
-                        label = { Text("Text to insert") },
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.None,
-                            autoCorrect = false,
-                            keyboardType = KeyboardType.Text,
-                        ),
-                        minLines = if (compact) 1 else 2,
-                        maxLines = if (compact) 2 else 5,
-                    )
+                    Column(Modifier.fillMaxWidth().weight(1f, fill = false)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text("Text to insert", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        AndroidView(
+                            modifier = Modifier.fillMaxWidth(),
+                            factory = { context ->
+                                CommandEditText(context).apply {
+                                    contentDescription = "Command text"
+                                    background = null
+                                    setPadding(0, 0, 0, 0)
+                                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                                    setText(value)
+                                    setSelection(text.length)
+                                    addTextChangedListener(object : TextWatcher {
+                                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                                            latestChange(s?.toString().orEmpty())
+                                        }
+                                        override fun afterTextChanged(s: Editable?) = Unit
+                                    })
+                                    post {
+                                        requestFocus()
+                                        context.getSystemService(InputMethodManager::class.java)
+                                            .showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                                    }
+                                }
+                            },
+                            update = { editor ->
+                                editor.minLines = if (compact) 1 else 2
+                                editor.maxLines = if (compact) 2 else 5
+                                editor.setTextColor(textColor)
+                                editor.highlightColor = selectionColor
+                                if (editor.text.toString() != value) {
+                                    val cursor = editor.selectionStart.coerceAtLeast(0).coerceAtMost(value.length)
+                                    editor.setText(value)
+                                    editor.setSelection(cursor)
+                                }
+                            },
+                        )
+                    }
                     if (!compact) {
                         Text("Line breaks become spaces.", style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(vertical = 8.dp))
@@ -69,6 +102,5 @@ fun TextInputDialog(
                 }
             }
         }
-        LaunchedEffect(Unit) { focus.requestFocus() }
     }
 }
