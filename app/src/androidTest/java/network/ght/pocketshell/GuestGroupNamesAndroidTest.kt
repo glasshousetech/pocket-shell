@@ -77,6 +77,19 @@ class GuestGroupNamesAndroidTest {
             println("GROUP_NAME_BASELINE code=" + baseline.code + " output=" + baseline.output.replace("\n", "\\n"))
             val numericGroups = baseline.output.lineSequence().first { it.startsWith("IDS=") }
 
+            if (abi == "x86_64") {
+                val probe = File(root, "tmp/pocketshell-syscalls-probe")
+                instrumentation.context.assets.open("runtime-syscalls-x86_64").use { input ->
+                    probe.outputStream().use { input.copyTo(it) }
+                }
+                assertTrue("Owned native probe must be executable", probe.setExecutable(true))
+                val syscalls = execute(context, wrapped.take(wrapperMarker - 3).toTypedArray() +
+                    arrayOf("/tmp/pocketshell-syscalls-probe"))
+                println("GROUP_NAME_SYSCALLS code=" + syscalls.code + " output=" + syscalls.output.replace("\n", "\\n"))
+                assertEquals("Native compatibility probe: " + syscalls.output, 0, syscalls.code)
+                assertTrue(syscalls.output, syscalls.output.contains("POCKETSHELL_SYSCALLS_OK"))
+            }
+
             val fixed = execute(context, Userland.prootExecArgs(context, distro,
                 "printf 'IDS='; id -G; groups; printf 'owned-storage-probe' > /root/.group-test; cat /root/.group-test"))
             println("GROUP_NAME_FIXED code=" + fixed.code + " output=" + fixed.output.replace("\n", "\\n"))
