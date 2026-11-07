@@ -183,7 +183,8 @@ object Userland {
     fun prootArgs(context: Context, distro: Distro, startupCommand: String? = null, tabId: String = TabIdentity.create()): Array<String> {
         TabIdentity.requireValid(tabId)
         val shell = if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh"
-        return baseArgs(context, distro) + arrayOf("GHT_TAB_ID=$tabId") + interactiveShellArgs(shell, startupCommand)
+        return baseArgs(context, distro) + arrayOf("GHT_TAB_ID=$tabId") +
+            groupAwareArgs(context, interactiveShellArgs(shell, startupCommand))
     }
 
     internal fun interactiveShellArgs(shell: String, startupCommand: String?): Array<String> =
@@ -192,7 +193,17 @@ object Userland {
 
     /** argv that runs [command] non-interactively inside [distro]'s rootfs (no PTY; used for provisioning). */
     fun prootExecArgs(context: Context, distro: Distro, command: String): Array<String> =
-        baseArgs(context, distro) + arrayOf("/bin/sh", "-c", command)
+        baseArgs(context, distro) + groupAwareArgs(context, arrayOf("/bin/sh", "-c", command))
+
+    @Volatile private var groupStartupScript: String? = null
+
+    private fun groupAwareArgs(context: Context, command: Array<String>): Array<String> {
+        val script = groupStartupScript ?: synchronized(this) {
+            groupStartupScript ?: context.assets.open("pocketshell-group-map.sh")
+                .bufferedReader().use { it.readText() }.also { groupStartupScript = it }
+        }
+        return GuestGroupNames.wrap(command, script, BuildConfig.VERSION_CODE)
+    }
 
     /** Removes every installed distro's rootfs so the picker starts fresh. */
     fun uninstall(context: Context): Result<Unit> = runCatching {
