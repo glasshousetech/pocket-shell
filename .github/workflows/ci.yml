@@ -159,6 +159,8 @@ jobs:
             adb shell dumpsys activity lastanr > native-last-anr.txt
             adb logcat -d -s System.out:I PocketShell.InputTiming:D > input-timings.txt
             mkdir -p app/build/outputs/theme-screenshots
+            # Terminal-only selections can legitimately have no screenshots.
+            adb shell run-as network.ght.pocketshell mkdir -p /data/data/network.ght.pocketshell/files/screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
             tar xf app/build/outputs/theme-screenshots.tar -C app/build/outputs/theme-screenshots
             grep -Eq 'OK \([1-9][0-9]* tests?\)' instrument-output.txt
