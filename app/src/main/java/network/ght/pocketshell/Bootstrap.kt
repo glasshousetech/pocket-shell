@@ -13,11 +13,13 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Installs a Linux userland: download (sha256-pinned) -> extract -> configure.
@@ -273,20 +275,35 @@ object Bootstrap {
         // Keep the *tail* of the guest output: apt/dpkg print thousands of
         // progress lines and the failure is always at the end.
         val tail = GuestOutputTail(maxChars = 24_000)
-        val reader = Thread {
-            proc.inputStream.bufferedReader().useLines { lines -> lines.forEach(tail::append) }
-        }.apply { isDaemon = true; start() }
-        val output = tail
-        if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-            proc.destroyForcibly()
+        val readFailure = AtomicReference<IOException?>()
+        val reader = Thread({
+            try {
+                proc.inputStream.bufferedReader().useLines { lines -> lines.forEach(tail::append) }
+            } catch (error: IOException) {
+                // Destroying a timed-out process can interrupt Android's pipe read.
+                // Report failures to this command's caller, never the app crash handler.
+                readFailure.set(error)
+            }
+        }, "pocketshell-setup-output").apply { isDaemon = true; start() }
+        try {
+            if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                DiagnosticLog.record(context, "setup", "command_timeout", "seconds=$timeoutSeconds")
+                throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
+            }
+            reader.join()
+            readFailure.get()?.let { error ->
+                DiagnosticLog.record(context, "setup", "output_read_failed", error.javaClass.simpleName)
+                throw IllegalStateException("Linux setup output could not be read.", error)
+            }
+            if (proc.exitValue() != 0) {
+                throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${tail.toString().takeLast(2_500)}")
+            }
+            return tail.toString()
+        } finally {
+            if (proc.isAlive) proc.destroyForcibly()
+            runCatching { proc.inputStream.close() }
             reader.join(2_000)
-            throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
         }
-        reader.join(2_000)
-        if (proc.exitValue() != 0) {
-            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.toString().takeLast(2_500)}")
-        }
-        return output.toString()
     }
 
     /** Minimal working network + package config inside the guest. */

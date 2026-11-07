@@ -57,8 +57,8 @@ class ScreenshotTest {
                 while (android.os.SystemClock.elapsedRealtime() < deadline &&
                     !device.hasObject(By.clazz(TERMINAL)) &&
                     !device.hasObject(By.text("Couldn't set up Linux"))) {
-                    // Wake on progress/error changes; allow complete package installation.
-                    device.waitForWindowUpdate(instrumentation.targetContext.packageName, 1_000)
+                    // Wait for the terminal while also checking for a recoverable setup error.
+                    device.wait(Until.hasObject(By.clazz(TERMINAL)), 1_000)
                 }
             }
             if (device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000) == null) {
