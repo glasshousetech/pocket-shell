@@ -285,7 +285,7 @@ object Bootstrap {
         if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
             reader.join(5_000)
-            DiagnosticLog.record(context, "linux", "process_timeout", "seconds=$timeoutSeconds")
+            DiagnosticLog.record(context, "linux", "process_timeout", "CommandTimeout")
             throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
         }
         reader.join(5_000)
