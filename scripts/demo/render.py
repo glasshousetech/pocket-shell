@@ -97,7 +97,7 @@ for chapter in chapters:
 manifest = {"revision": revision, "surface": "isolated Android API 34 emulator, 720x1280", "fixture": "harmless literal shell message",
             "narrator": story["narrator"], "voiceId": story["voice"], "duration": duration, "chapters": chapters,
             "continuousCapture": True, "speed": 1, "sourceStart": start, "sourceEnd": end,
-            "preferredVoice": "Mark — Natural Conversations", "preferredVoiceAvailable": False,
+            "preferredVoice": "Mark — Natural Conversations", "preferredVoiceAvailable": story["voice"] == "UgBBYS2sOqTuMpoF3BR0",
             "verification": {"nativeTests": "OK (2 tests)", "fullDecode": True, "player": "pending", "listening": "pending"}}
 manifest["files"] = {name: hashlib.sha256((work / name).read_bytes()).hexdigest()
                      for name in ["raw.mp4", "PocketShell-demo.mp4", "captions.vtt", "transcript.txt"]}

@@ -111,8 +111,8 @@ class WorkbenchUiTest {
                 text("Add command").click()
                 text("Save command")
                 setField("Command name", 0, "Print a message")
-                setField("Command template", 1, "printf '%s\\n' {{message}}")
-                waitFor("template draft entered") { service.workbench.editing?.template == "printf '%s\\n' {{message}}" }
+                setField("Command template", 1, "printf 'DEMO_%s %s\\n' MATCH {{message}} MATCH {{message}}")
+                waitFor("template draft entered") { service.workbench.editing?.template == "printf 'DEMO_%s %s\\n' MATCH {{message}} MATCH {{message}}" }
                 scenario.recreate()
                 text("Save command")
                 assertEquals("Draft survives Activity recreation", "Print a message", fields()[0].text)
@@ -122,10 +122,13 @@ class WorkbenchUiTest {
                 beat("saved")
 
                 desc("Use Print a message").click()
-                val value = "DEMO_MATCH it's literal " + "$" + "(printf injected)"
+                // The query appears in two printed lines, never in the shell input echo.
+                // Narrow terminals may horizontally scroll echoed input.
+                val value = "it's literal " + "$" + "(printf injected)"
+                val output = "DEMO_MATCH " + value
                 setField("Parameter: message", 0, value)
                 waitFor("parameter field committed") { service.workbench.parameters["message"] == value }
-                val exact = CommandTemplate.render("printf '%s\\n' {{message}}", mapOf("message" to value))
+                val exact = CommandTemplate.render("printf 'DEMO_%s %s\\n' MATCH {{message}} MATCH {{message}}", mapOf("message" to value))
                 text(exact)
                 scenario.recreate()
                 text(exact)
@@ -133,10 +136,10 @@ class WorkbenchUiTest {
                 text("Insert command").click()
                 waitFor("insert closes tools") { service.workbench.page == null }
                 assertFalse("Insert must not execute",
-                    main { holder.session.emulator.screen.transcriptText.lineSequence().any { it.trim() == value } })
+                    main { holder.session.emulator.screen.transcriptText.lineSequence().any { it.trim() == output } })
                 device.pressKeyCode(KeyEvent.KEYCODE_ENTER)
-                waitFor("literal parameter executed once") {
-                    holder.session.emulator.screen.transcriptText.lineSequence().count { it.trim() == value } == 1
+                waitFor("one execution prints exactly two literal lines") {
+                    holder.session.emulator.screen.transcriptText.lineSequence().count { it.trim() == output } == 2
                 }
                 scenario.onActivity { activity ->
                     activity.getSystemService(InputMethodManager::class.java)
@@ -152,7 +155,7 @@ class WorkbenchUiTest {
                 text("Next match").click()
                 text("Match 2 of 2")
                 text("Copy matching line").click()
-                assertEquals(value, main { Clip.paste() })
+                assertEquals(output, main { Clip.paste() })
                 beat("search")
                 setField("Find in output", 0, "NO_MATCH_6c16cc41")
                 text("No matches in this snapshot.")
