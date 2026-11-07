@@ -160,7 +160,7 @@ class WorkbenchUiTest {
                 setField("Find in output", 0, "NO_MATCH_6c16cc41")
                 text("No matches in this snapshot.")
                 beat("empty")
-                text("Close tools").click()
+                desc("Close tools").click()
 
                 // Reload the library from its actual atomic file, then edit and delete through UI.
                 text("Actions").click()
@@ -175,7 +175,7 @@ class WorkbenchUiTest {
                 text("Delete command").click()
                 waitFor("deletion committed") { service.workbench.commands.isEmpty() }
                 assertTrue(CommandStore.load(context).getOrThrow().isEmpty())
-                text("Close tools").click()
+                desc("Close tools").click()
 
                 // Palette selection routes the visible service selection without executing anything.
                 val sibling = main { service.newSession(SessionMode.SYSTEM).also { service.renameSession(it, "Sibling terminal") } }

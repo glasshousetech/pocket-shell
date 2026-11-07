@@ -31,6 +31,8 @@ class JobsWorkbench(
     var command by mutableStateOf("")
     var directory by mutableStateOf("")
     var review by mutableStateOf<RemoteJob?>(null)
+    var editorOpen by mutableStateOf(true)
+    var checkSettingsOpen by mutableStateOf(false)
     private val preferences = context.getSharedPreferences("remote_jobs", Context.MODE_PRIVATE)
     var timeoutInput by mutableStateOf(preferences.getLong("timeout", 120).toString())
     var intervalInput by mutableStateOf(preferences.getLong("interval", 10).toString())
@@ -51,6 +53,7 @@ class JobsWorkbench(
         scope.launch {
             try {
                 storage.withLock { jobs = withContext(Dispatchers.IO) { JobStore.load(context) } }
+                editorOpen = jobs.isEmpty()
                 loaded = true
                 ensureWatcher()
             } catch (failure: Exception) {
@@ -110,6 +113,7 @@ class JobsWorkbench(
             // Store immutable identity and exact command before the first remote write.
             val existing = jobs.firstOrNull { it.id == job.id }
             if (existing == null) create(job.validate())
+            editorOpen = false
             hostGate(job.profile).withLock {
                 val current = jobs.first { it.id == job.id }
                 try {

@@ -61,7 +61,9 @@ fun WorkbenchDialog(
                         if (page != WorkbenchState.Page.PALETTE) TextButton(onClick = {
                             state.page = WorkbenchState.Page.PALETTE; state.error = null
                         }) { Text("Actions") }
-                        TextButton(onClick = state::close) { Text("Close tools") }
+                        IconButton(onClick = state::close, modifier = Modifier.size(48.dp).semantics { contentDescription = "Close tools" }) {
+                            Text("×", style = MaterialTheme.typography.headlineSmall)
+                        }
                     }
                     if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                     state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

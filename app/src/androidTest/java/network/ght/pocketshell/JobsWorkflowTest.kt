@@ -142,7 +142,7 @@ class JobsWorkflowTest {
             main { service.workbench.close() }
             requireNotNull(resultAction).send()
             text("Remote jobs")
-            scroll("Failed · exit 7")
+            text("Failed · exit 7")
             val screenshotDir = File(context.filesDir, "screenshots").apply { mkdirs() }
             device.takeScreenshot(File(screenshotDir, "remote-jobs-result.png"))
         } finally {
