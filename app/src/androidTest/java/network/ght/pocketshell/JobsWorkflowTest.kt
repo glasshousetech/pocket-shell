@@ -56,6 +56,16 @@ class JobsWorkflowTest {
         }
     }
 
+
+    private fun demoBeat(id: String) {
+        if (InstrumentationRegistry.getArguments().getString("demoRecording") != "true") return
+        val directory = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+        File(directory, "jobs-demo-timeline.jsonl").appendText(
+            org.json.JSONObject().put("beat", id).put("uptimeMs", SystemClock.uptimeMillis()).toString() + "\n")
+        // Narrated recording only: leave the verified screen readable.
+        SystemClock.sleep(InstrumentationRegistry.getArguments().getString("demoHoldMs", "10000").toLong())
+    }
+
     @Test fun reviewedRunPostsActualFailureResultAndRestoresWithoutDuplicateExecution() {
         assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         val context = instrumentation.targetContext
@@ -85,7 +95,7 @@ class JobsWorkflowTest {
             }
         }
         waitFor("Job records did not load") { main { state.loaded } }
-        var resultAction: android.app.PendingIntent? = null
+        var resultJobId: String? = null
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 main { service.workbench.page = WorkbenchState.Page.JOBS }
@@ -93,10 +103,13 @@ class JobsWorkflowTest {
                 scroll("Review remote job").click()
                 text("Start Native job verification?")
                 assertEquals(command, main { state.review!!.command })
+                demoBeat("review")
                 text("Start remote job").click()
                 waitFor("Actual job result was not observed: " + main { state.error }) {
                     main { state.jobs.firstOrNull()?.observation?.state == "FAILED" }
                 }
+                text("Failed · exit 7")
+                demoBeat("result")
                 val job = main { state.jobs.first() }
                 assertEquals(7, job.observation!!.exit)
                 waitFor("Result notification was not posted") { manager.activeNotifications.any { it.tag == job.id } }
@@ -122,7 +135,7 @@ class JobsWorkflowTest {
                 assertEquals(command, saved.command)
                 assertEquals(requireNotNull(saved.observation).resultKey, saved.notifiedResult)
 
-                resultAction = notification.notification.contentIntent
+                resultJobId = job.id
 
                 val freshScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
                 val restored = main { JobsWorkbench(context, freshScope).apply { available = { true }; request = { _, script, timeout -> fixture(script, timeout) } } }
@@ -135,12 +148,14 @@ class JobsWorkflowTest {
                     assertEquals(7, main { restored.jobs.first().observation!!.exit })
                     assertEquals(posted, manager.activeNotifications.single { it.tag == job.id }.postTime)
                 } finally { main { restored.close(); freshScope.cancel() } }
-                manager.cancel(job.id, 2001)
             }
-            // Finish the scenario-owned Activity before an external notification opens a new one.
-            // ActivityScenario otherwise loses lifecycle matching when onNewIntent changes its launch intent.
+            // Tap the actual Android notification after closing the scenario-owned Activity.
+            // A synthetic PendingIntent.send from the background is correctly blocked by Android.
             main { service.workbench.close() }
-            requireNotNull(resultAction).send()
+            device.openNotification()
+            text("Native job verification")
+            demoBeat("notification")
+            text("Native job verification").click()
             text("Remote jobs")
             text("Failed · exit 7")
             val screenshotDir = File(context.filesDir, "screenshots").apply { mkdirs() }
@@ -152,6 +167,7 @@ class JobsWorkflowTest {
                     .filterIsInstance<MainActivity>().toList().forEach { it.finish() }
                 state.jobs.toList().forEach { state.setWatching(it, false) }; service.workbench.close(); service.sessions.toList().forEach(service::closeSession) }
             waitFor("Watch records did not settle") { main { !state.busy } }
+            resultJobId?.let { manager.cancel(it, 2001) }
             main { state.timeoutInput = previousTimeout.toString(); state.intervalInput = previousInterval.toString(); state.applySettings() }
             if (previous == null) recordFile.delete() else recordFile.writeBytes(previous)
             device.pressBack()

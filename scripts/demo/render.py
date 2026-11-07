@@ -1,19 +1,25 @@
 """Render a continuous native recording with timed narration and accessible review files.
 No app UI is reconstructed. Fails if narration outlasts the observed on-screen beat.
 """
-import hashlib, html, json, pathlib, subprocess, sys
+import hashlib, html, json, pathlib, re, subprocess, sys
 
 work = pathlib.Path(sys.argv[1]).resolve()
 revision = sys.argv[2]
 story = json.loads((work / "script.json").read_text())
 speech = json.loads((work / "narration.json").read_text())
-events = [json.loads(line) for line in (work / "screenshots/workbench-demo-timeline.jsonl").read_text().splitlines() if line]
+title = story.get("title", "Save, run and find")
+fixture = story.get("fixture", "harmless literal shell message")
+expected_tests = story.get("nativeTests", "OK (2 tests)")
+test_output = (work / "instrument-output.txt").read_text()
+if expected_tests not in test_output or re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE: -[234]", test_output):
+    raise SystemExit("Native workflow did not pass; retain failure evidence instead.")
+events = [json.loads(line) for line in (work / "screenshots" / story.get("timeline", "workbench-demo-timeline.jsonl")).read_text().splitlines() if line]
 if [event["beat"] for event in events] != [beat["id"] for beat in story["beats"]]:
     raise SystemExit("Recorded beats do not exactly match the narration storyboard.")
 boot_start = float((work / "capture-start.txt").read_text().split()[0]) * 1000
 raw_times = [(event["uptimeMs"] - boot_start) / 1000 for event in events]
 start = max(0, raw_times[0] - 0.35)
-end = raw_times[-1] + 10
+end = raw_times[-1] + story.get("holdSeconds", 10)
 duration = end - start
 
 def probe(file):
@@ -68,8 +74,9 @@ for cue in cues:
 (work / "captions.ass").write_text("\n".join(ass), encoding="utf-8")
 audio_filters.append("".join(f"[a{i}]" for i in range(len(chapters))) +
                      f"amix=inputs={len(chapters)}:normalize=0,apad=whole_dur={duration},loudnorm=I=-16:TP=-1.5:LRA=11[voice]")
+(work / "title.txt").write_text("PocketShell — " + title, encoding="utf-8")
 filters = (f"trim=start={start}:end={end},setpts=PTS-STARTPTS,fps=30,pad=iw:ih+304:0:80:color=0x0c1424,"
-           "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='PocketShell — save, run, find':fontcolor=white:fontsize=28:x=24:y=18,"
+           "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=title.txt:fontcolor=white:fontsize=28:x=24:y=18,"
            f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Android emulator · candidate {revision[:8]}':fontcolor=0xa9bad1:fontsize=18:x=24:y=53,"
            "ass=captions.ass")
 subprocess.run(["ffmpeg", "-y", "-v", "warning", "-i", "raw.mp4", *narration_inputs, "-filter_complex", ";".join(audio_filters),
@@ -87,18 +94,18 @@ frames.mkdir(exist_ok=True)
 for chapter in chapters:
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(chapter["time"] + 1), "-i", str(work / "PocketShell-demo.mp4"),
                     "-frames:v", "1", str(frames / (chapter["id"] + ".png"))], check=True)
-subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(chapters[3]["time"] + 1), "-i", str(work / "PocketShell-demo.mp4"),
+subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(chapters[min(3, len(chapters) - 1)]["time"] + 1), "-i", str(work / "PocketShell-demo.mp4"),
                 "-frames:v", "1", str(work / "poster.png")], check=True)
-transcript = ["PocketShell: save, run, find", f"Candidate {revision}; isolated Android emulator; controlled command fixture.",
+transcript = ["PocketShell: " + title, f"Candidate {revision}; isolated Android emulator; " + fixture + ".",
               "Narrator: " + story["narrator"], ""]
 for chapter in chapters:
     transcript += [clock(chapter["time"]) + " — " + chapter["title"], chapter["text"], ""]
 (work / "transcript.txt").write_text("\n".join(transcript), encoding="utf-8")
-manifest = {"revision": revision, "surface": "isolated Android API 34 emulator, 720x1280", "fixture": "harmless literal shell message",
+manifest = {"revision": revision, "surface": "isolated Android API 34 emulator, 720x1280", "fixture": fixture,
             "narrator": story["narrator"], "voiceId": story["voice"], "duration": duration, "chapters": chapters,
             "continuousCapture": True, "speed": 1, "sourceStart": start, "sourceEnd": end,
             "preferredVoice": "Mark — Natural Conversations", "preferredVoiceAvailable": story["voice"] == "UgBBYS2sOqTuMpoF3BR0",
-            "verification": {"nativeTests": "OK (2 tests)", "fullDecode": True, "player": "pending", "listening": "pending"}}
+            "verification": {"nativeTests": expected_tests, "fullDecode": True, "player": "pending", "listening": "pending"}}
 manifest["files"] = {name: hashlib.sha256((work / name).read_bytes()).hexdigest()
                      for name in ["raw.mp4", "PocketShell-demo.mp4", "captions.vtt", "transcript.txt"]}
 (work / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -113,7 +120,7 @@ video{width:100%;max-height:82vh;background:#0c1424;border-radius:12px;display:b
 button:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #6bd4ff;outline-offset:3px}nav{display:grid;gap:10px}nav button{text-align:left}
 .controls{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}a{color:#8edaff}section{border-top:1px solid #2d405a;margin-top:18px;padding-top:12px}
 small{color:#afc3de}#status{min-height:1.5em}summary{cursor:pointer}p{margin:12px 0}@media(max-width:760px){main{padding:18px}.layout{grid-template-columns:1fr}video{max-height:75vh}}</style>
-<main><h1>Save it. Run it. Find the result.</h1><p class="lead">A real PocketShell command workflow, recorded continuously on an isolated Android emulator. This candidate is not a claim about the version installed on your Fold.</p>
+<main><h1>__TITLE__</h1><p class="lead">A real PocketShell workflow, recorded continuously on an isolated Android emulator. __FIXTURE__. This does not establish the version installed on your Fold.</p>
 <div class="layout"><div><video id="demo" controls playsinline preload="metadata" poster="poster.png" aria-label="Narrated PocketShell command workflow"><source src="PocketShell-demo.mp4" type="video/mp4"><track src="captions.vtt" kind="captions" srclang="en" label="English captions"></video>
 <p id="spoken-caption" style="min-height:3em;color:#edf4ff" aria-live="off"></p><div class="controls"><button id="play">Play demo</button><label>Speed <select id="speed"><option value=".75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label></div>
 <p id="status" role="status"></p></div><aside><h2>Jump to a step</h2><nav aria-label="Demo chapters">__BUTTONS__</nav>
@@ -127,6 +134,6 @@ v.onended=()=>status.textContent='Finished';v.onseeked=()=>status.textContent=v.
 document.getElementById('speed').onchange=e=>v.playbackRate=Number(e.target.value);
 document.querySelectorAll('[data-time]').forEach(b=>b.onclick=()=>{v.currentTime=Number(b.dataset.time);v.play().catch(e=>status.textContent=e.message)});
 </script></html>"""
-page = page.replace("__BUTTONS__", buttons).replace("__NARRATOR__", html.escape(story["narrator"])).replace("__REVISION__", revision[:8]).replace("__TRANSCRIPT__", transcript_html)
+page = page.replace("__TITLE__", html.escape(title)).replace("__FIXTURE__", html.escape(fixture)).replace("__BUTTONS__", buttons).replace("__NARRATOR__", html.escape(story["narrator"])).replace("__REVISION__", revision[:8]).replace("__TRANSCRIPT__", transcript_html)
 (work / "index.html").write_text(page, encoding="utf-8")
 print(json.dumps({"duration": duration, "chapters": len(chapters), "revision": revision, "fullDecode": True, "playerReview": "pending", "listeningReview": "pending"}))

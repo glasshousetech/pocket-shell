@@ -44,6 +44,16 @@ class RemoteWorkspaceUiTest {
         return checkNotNull(device.findObject(By.desc(value))) { "Missing action: " + value }
     }
 
+
+    private fun demoBeat(id: String) {
+        if (InstrumentationRegistry.getArguments().getString("demoRecording") != "true") return
+        val directory = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+        File(directory, "handoff-demo-timeline.jsonl").appendText(
+            org.json.JSONObject().put("beat", id).put("uptimeMs", SystemClock.uptimeMillis()).toString() + "\n")
+        // Narrated recording only: leave the verified screen readable.
+        SystemClock.sleep(InstrumentationRegistry.getArguments().getString("demoHoldMs", "10000").toLong())
+    }
+
     @Test fun copyHandoffRetainsItsExactTargetAcrossRecreationAndReportsEmptyAndInvalidInput() {
         assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         val context = instrumentation.targetContext
@@ -83,6 +93,7 @@ class RemoteWorkspaceUiTest {
                 scrollToDescription("Copy PC handoff Fixture workspace")
                 text("PC command copied")
                 assertEquals(copied, main { Clip.paste() })
+                demoBeat("handoff")
                 val directory = File(context.filesDir, "screenshots").apply { mkdirs() }
                 device.takeScreenshot(File(directory, "remote-workspace-handoff.png"))
 

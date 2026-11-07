@@ -1,0 +1,26 @@
+{
+  "title": "Leave a job running and return",
+  "fixture": "Synthetic command deliberately exits7 on the CI Linux host; real server runner, durable receipts and Android notifications",
+  "nativeTests": "OK (2 tests)",
+  "timeline": "jobs-demo-timeline.jsonl",
+  "beats": [
+    {
+      "id": "review",
+      "title": "Review the exact job",
+      "narration": "Review the command and destination before starting. This test deliberately exits with code seven, so we can verify a failure result."
+    },
+    {
+      "id": "result",
+      "title": "Read the actual exit result",
+      "narration": "The result comes from the real server process. Failed, exit seven. Its output and saved status remain available after reconnecting."
+    },
+    {
+      "id": "notification",
+      "title": "Return through the notification",
+      "narration": "Android shows the actual job result. Tap its notification to reopen the saved job in PocketShell."
+    }
+  ],
+  "voice": "UgBBYS2sOqTuMpoF3BR0",
+  "narrator": "Mark — Natural Conversations (ElevenLabs)",
+  "holdSeconds": 15
+}

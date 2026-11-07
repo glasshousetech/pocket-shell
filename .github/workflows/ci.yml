@@ -18,6 +18,15 @@ on:
         description: Record and narrate the verified native command workflow
         type: boolean
         default: false
+      demo_suite:
+        description: Native workflow capture set
+        type: choice
+        options: [workbench, workflows]
+        default: workbench
+      reuse_narration:
+        description: Capture only; reuse verified narration during server rendering
+        type: boolean
+        default: false
       render_demo_run:
         description: Existing successful native recording run to narrate without rerunning the app
         type: string
@@ -194,7 +203,7 @@ jobs:
     # Manual-only: walks the app through a few real screens on a booted
     # emulator and uploads what it looked like. UI-coordinate/text automation
     # is more brittle than the smoke test above, so this never gates a push.
-    if: github.event_name == 'workflow_dispatch' && inputs.record_demo != true && inputs.render_demo_run == ''
+    if: github.event_name == 'workflow_dispatch' && inputs.record_demo != true && inputs.render_demo_run == '' && inputs.test_classes == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -296,6 +305,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - name: Start native transfer and job fixtures
+        run: |
+          if ! test -x /usr/lib/openssh/sftp-server; then sudo apt-get install -y openssh-sftp-server; fi
+          python3 scripts/test-sftp-server.py > demo-fixture.log 2>&1 &
+          echo $! > demo-fixture.pid
       - name: Record verified native workflow
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -304,8 +318,16 @@ jobs:
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash scripts/demo/record.sh
+          script: bash scripts/demo/${{ inputs.demo_suite == 'workflows' && 'record-all.sh' || 'record.sh' }}
+      - name: Stop native demo fixture
+        if: always()
+        run: |
+          if test -f demo-fixture.pid; then
+            pid=$(cat demo-fixture.pid)
+            if test -r /proc/$pid/cmdline && tr "\0" " " < /proc/$pid/cmdline | grep -q "scripts/test-sftp-server.py"; then kill "$pid"; fi
+          fi
       - name: Narrate recorded outcomes
+        if: inputs.reuse_narration != true && inputs.demo_suite != 'workflows'
         run: |
           python3 -m pip install edge-tts==7.3.1
           cp scripts/demo/story.json demo-output/script.json

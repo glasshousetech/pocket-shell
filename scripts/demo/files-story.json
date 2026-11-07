@@ -1,0 +1,26 @@
+{
+  "title": "Move files with verified results",
+  "fixture": "Synthetic Android documents and real OpenSSH SFTP server; SSH authentication verified separately",
+  "nativeTests": "OK (1 test)",
+  "timeline": "files-demo-timeline.jsonl",
+  "beats": [
+    {
+      "id": "upload",
+      "title": "Upload through SFTP",
+      "narration": "The file is on the server. PocketShell checks the transferred bytes before marking the upload complete."
+    },
+    {
+      "id": "conflict",
+      "title": "Handle an existing file",
+      "narration": "When a file already exists, choose what happens. This option preserves the old file as a backup before replacing it."
+    },
+    {
+      "id": "export",
+      "title": "Save a verified download",
+      "narration": "The download is saved to the phone and its checksum matches. The transfer receipt keeps the confirmed result."
+    }
+  ],
+  "voice": "UgBBYS2sOqTuMpoF3BR0",
+  "narrator": "Mark — Natural Conversations (ElevenLabs)",
+  "holdSeconds": 15
+}

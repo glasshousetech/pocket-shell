@@ -47,6 +47,16 @@ class FilesWorkflowTest {
         assertNull(main { state.error })
     }
 
+
+    private fun demoBeat(id: String) {
+        if (InstrumentationRegistry.getArguments().getString("demoRecording") != "true") return
+        val directory = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+        File(directory, "files-demo-timeline.jsonl").appendText(
+            org.json.JSONObject().put("beat", id).put("uptimeMs", SystemClock.uptimeMillis()).toString() + "\n")
+        // Narrated recording only: leave the verified screen readable.
+        SystemClock.sleep(InstrumentationRegistry.getArguments().getString("demoHoldMs", "10000").toLong())
+    }
+
     @Test fun realUploadConflictDownloadExportAndRecreation() {
         assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         println("FILES_PHASE starting")
@@ -103,6 +113,9 @@ class FilesWorkflowTest {
                 assertEquals(FileTransfer.Phase.COMPLETE, main { files.transfers.first().phase })
                 assertEquals(bytes.size.toLong(), main { files.transfers.first().size })
                 val firstIdentity = main { files.transfers.first().id }
+                UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text("upload α.bin"))
+                text("upload α.bin")
+                demoBeat("upload")
 
                 scenario.recreate()
                 text("Remote files")
@@ -112,7 +125,11 @@ class FilesWorkflowTest {
                 ready(files)
                 val conflict = main { files.transfers.first() }
                 assertEquals(FileTransfer.Phase.CONFLICT, conflict.phase)
-                main { files.resolve(conflict, "replace") }
+                UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text("Replace and keep backup"))
+                text("Replace and keep backup").click()
+                text("Replace this file?")
+                demoBeat("conflict")
+                text("Replace with backup").click()
                 ready(files)
                 assertEquals(FileTransfer.Phase.COMPLETE, main { files.transfers.first().phase })
                 assertTrue(main { files.entries!!.any { it.name == conflict.backup.let { path -> SftpClient.Path.of(path.bytes.copyOfRange(path.bytes.indexOfLast { it == 47.toByte() } + 1, path.bytes.size)) } } })
@@ -126,6 +143,9 @@ class FilesWorkflowTest {
                 ready(files)
                 assertEquals("Saved to your phone and checksum verified.", main { files.status })
                 assertArrayEquals(bytes, context.contentResolver.openInputStream(outputUri)!!.use { it.readBytes() })
+                UiScrollable(UiSelector().scrollable(true)).flingToBeginning(6)
+                text("Saved to your phone and checksum verified.")
+                demoBeat("export")
                 val screenshots = File(context.filesDir, "screenshots").apply { mkdirs() }
                 device.takeScreenshot(File(screenshots, "remote-files-verified.png"))
 

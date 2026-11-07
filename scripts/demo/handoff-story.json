@@ -1,0 +1,16 @@
+{
+  "title": "Keep your remote workspace",
+  "fixture": "Synthetic workspace identity in the native UI; real tmux continuity verified separately",
+  "nativeTests": "OK (1 test)",
+  "timeline": "handoff-demo-timeline.jsonl",
+  "beats": [
+    {
+      "id": "handoff",
+      "title": "Take the session to your PC",
+      "narration": "Copy a handoff command for this exact workspace. It reconnects to the existing session, so your work can move between phone and PC."
+    }
+  ],
+  "voice": "UgBBYS2sOqTuMpoF3BR0",
+  "narrator": "Mark — Natural Conversations (ElevenLabs)",
+  "holdSeconds": 15
+}
