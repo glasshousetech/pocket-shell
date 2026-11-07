@@ -81,6 +81,84 @@ class TermService : Service() {
     val linuxRemovalState = mutableStateOf(RemovalState.IDLE)
     private val operations = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    val workbench = WorkbenchState()
+
+    fun openWorkbench(page: WorkbenchState.Page = WorkbenchState.Page.PALETTE) {
+        workbench.page = page
+        loadWorkbench()
+    }
+
+    fun loadWorkbench() {
+        if (workbench.loading) return
+        workbench.loading = true
+        operations.launch {
+            try {
+                val commands = withContext(Dispatchers.IO) { CommandStore.load(applicationContext) }
+                val connections = withContext(Dispatchers.IO) { ConnectionStore.load(applicationContext) }
+                commands.onSuccess { workbench.commands = it; workbench.commandError = null }
+                    .onFailure { workbench.commandError = "Could not read saved commands. Existing data was kept." }
+                connections.onSuccess { workbench.connections = it; workbench.connectionError = null }
+                    .onFailure { workbench.connectionError = "Could not read saved connections. Existing data was kept." }
+                DiagnosticLog.record(applicationContext, "workbench", "libraries_loaded",
+                    if (commands.isFailure || connections.isFailure) "StorageReadFailure" else null)
+            } finally { workbench.loading = false }
+        }
+    }
+
+    fun saveCommand(command: SavedCommand) {
+        if (workbench.loading) return
+        workbench.loading = true
+        workbench.error = null
+        operations.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { CommandStore.save(applicationContext, command) }
+                result.onSuccess { workbench.commands = it; workbench.editing = null; workbench.commandError = null }
+                    .onFailure {
+                        workbench.error = if (it is IllegalArgumentException) it.message else "The command could not be saved. Your draft is kept."
+                        DiagnosticLog.record(applicationContext, "commands", "save_failed", it.javaClass.simpleName)
+                    }
+            } finally { workbench.loading = false }
+        }
+    }
+
+    fun deleteCommand(id: String) {
+        if (workbench.loading) return
+        workbench.loading = true
+        operations.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { CommandStore.delete(applicationContext, id) }
+                result.onSuccess { workbench.commands = it; workbench.deleting = null; workbench.error = null }
+                    .onFailure { workbench.error = "The command could not be deleted. Your library was kept." }
+            } finally { workbench.loading = false }
+        }
+    }
+
+    fun checkConnection(profile: SshProfile) {
+        if (workbench.diagnosticBusy) return
+        val timeout = workbench.diagnosticTimeout.toLongOrNull()
+        if (timeout == null || timeout <= 0) { workbench.error = "Enter a positive timeout in seconds."; return }
+        workbench.diagnosticBusy = true
+        workbench.diagnosticProfile = profile
+        workbench.diagnosis = null
+        workbench.error = null
+        DiagnosticLog.record(applicationContext, "connection_check", "started")
+        operations.launch {
+            try {
+                val result = GuestCommand.run(applicationContext, ConnectionDiagnostics.command(profile, timeout), timeout)
+                val diagnosis = ConnectionDiagnostics.classify(result, profile)
+                workbench.diagnosis = diagnosis
+                DiagnosticLog.record(applicationContext, "connection_check", diagnosis.category,
+                    if (diagnosis.successful) null else "CheckNeedsAttention", exitCode = result.exitCode)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                workbench.diagnosis = ConnectionDiagnosis("check_incomplete",
+                    "The check could not finish.", "Verify Linux setup and connectivity, or increase the timeout. Open the terminal for interactive sign-in.")
+                DiagnosticLog.record(applicationContext, "connection_check", "incomplete", failure.javaClass.simpleName)
+            } finally { workbench.diagnosticBusy = false }
+        }
+    }
+
     /** One request at a time; rotation must not cancel it or lose its terminal of origin. */
     internal fun requestCopilot(origin: TermSession, prompt: String, terminalText: String?, mode: AiCopilot.Mode,
         request: suspend () -> Result<String> = { AiCopilot.ask(applicationContext, prompt, terminalText, mode) }) {

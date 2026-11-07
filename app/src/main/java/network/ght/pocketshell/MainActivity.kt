@@ -104,6 +104,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_P && event.isCtrlPressed && event.isShiftPressed &&
+            event.action == KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount == 0) serviceState.value?.openWorkbench()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onDestroy() {
         runCatching { unbindService(connection) }
         super.onDestroy()
@@ -474,6 +483,61 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         )
     }
 
+    fun captureOutput() {
+        val state = service.workbench
+        val holder = sessions.firstOrNull { it.id == state.targetId }
+        if (holder == null) { state.error = "The original tab is no longer open."; return }
+        state.outputLabel = holder.displayName
+        state.outputLines = holder.session.emulator?.screen?.transcriptText.orEmpty().split('\n')
+        state.matchIndex = 0
+        state.error = null
+        DiagnosticLog.record(ctx, "output_search", "snapshot_captured", tabId = holder.tabId)
+    }
+
+    if (service.workbench.page != null) {
+        WorkbenchDialog(service,
+            onConnect = ::connect,
+            onRefreshOutput = ::captureOutput,
+            onInsert = { command ->
+                val state = service.workbench
+                val target = sessions.firstOrNull { it.id == state.targetId }
+                if (target == null || selectedSessionId != target.id) {
+                    state.error = "Select the original live tab before inserting."
+                } else {
+                    ReviewedCommand.insert(target, state.targetId, command, run = false)
+                        .onSuccess {
+                            state.using = null
+                            state.close()
+                            DiagnosticLog.record(ctx, "commands", "inserted", tabId = target.tabId)
+                            viewClient.showKeyboard()
+                        }.onFailure { state.error = it.message ?: "The command was not inserted. Your draft is kept." }
+                }
+            },
+            onAction = { action ->
+                val state = service.workbench
+                when (action) {
+                    "Search output" -> {
+                        state.targetId = selectedSessionId
+                        state.page = WorkbenchState.Page.OUTPUT
+                        captureOutput()
+                    }
+                    "Saved commands" -> { state.page = WorkbenchState.Page.COMMANDS; state.error = null }
+                    "Connection check" -> { state.page = WorkbenchState.Page.DIAGNOSIS; state.error = null }
+                    else -> {
+                        state.close()
+                        when (action) {
+                            "Connections" -> connectionsOpen = true
+                            "New tab" -> addLinux()
+                            "Text / voice" -> textInputSessionId = selectedSessionId
+                            "AI Copilot" -> copilotOpen = true
+                            "Themes" -> themeOpen = true
+                            "Settings" -> settingsOpen = true
+                        }
+                    }
+                }
+            })
+    }
+
     if (sessions.isEmpty()) {
         SetupHome(
             installed = Userland.installedDistro(ctx) != null,
@@ -689,6 +753,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     KeyChip("Live") { termViewRef.value?.let(TerminalInteraction::followOutput) }
                 }
             }
+            KeyChip("Actions") { viewClient.hideKeyboard(); service.openWorkbench() }
             KeyChip("Text / voice") {
                 viewClient.clearStickyModifiers()
                 textInputSessionId = active.id

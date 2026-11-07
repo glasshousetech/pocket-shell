@@ -34,11 +34,11 @@ object ConnectionStore {
 
     @Synchronized fun save(context: Context, connection: SavedConnection): Result<List<SavedConnection>> = runCatching {
         require(connection.profile.name.isNotBlank()) { "Enter a connection name." }
-        require(connection.profile.name.length <= 80 && connection.profile.host.length <= 253) { "Connection name or host is too long." }
+        require(connection.profile.host.length <= 253) { "A DNS hostname cannot exceed 253 characters." }
         connection.profile.command() // Validate without opening a connection.
         val current = load(context).getOrThrow().toMutableList()
         val index = current.indexOfFirst { it.id == connection.id }
-        if (index < 0) { require(current.size < 100) { "The library supports up to 100 saved connections." }; current.add(connection) }
+        if (index < 0) current.add(connection)
         else current[index] = connection
         write(context, current)
         DiagnosticLog.record(context, "connections", "profile_saved")
