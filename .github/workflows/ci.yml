@@ -10,6 +10,10 @@ on:
     branches: [master]
   workflow_dispatch:
     inputs:
+      test_classes:
+        description: Optional focused native test classes; leave blank for the full regression suite
+        type: string
+        default: ""
       record_demo:
         description: Record and narrate the verified native command workflow
         type: boolean
@@ -84,6 +88,8 @@ jobs:
           if-no-files-found: warn
 
   instrumented-test:
+    env:
+      POCKET_TEST_CLASSES: ${{ inputs.test_classes || 'network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest,network.ght.pocketshell.FilesWorkflowTest' }}
     if: github.event_name != 'workflow_dispatch' || inputs.render_demo_run == ''
     # Real behavioral gate: spawns an actual TermService + shell on a booted
     # emulator and asserts a command's output round-trips. This is the check
@@ -138,7 +144,10 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -r -w -e class network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest,network.ght.pocketshell.FilesWorkflowTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb logcat -c
+            adb shell am instrument -r -w -e class "$POCKET_TEST_CLASSES" network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb logcat -d > native-logcat.txt
+            adb shell dumpsys activity lastanr > native-last-anr.txt
             adb logcat -d -s System.out:I PocketShell.InputTiming:D > input-timings.txt
             mkdir -p app/build/outputs/theme-screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
@@ -164,6 +173,8 @@ jobs:
             instrument-output.txt
             input-timings.txt
             sftp-fixture.log
+            native-logcat.txt
+            native-last-anr.txt
           if-no-files-found: warn
 
       # Gradle prints only a pass/fail summary, so without this there is no way

@@ -46,17 +46,22 @@ class FilesWorkflowTest {
 
     @Test fun realUploadConflictDownloadExportAndRecreation() {
         assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+        println("FILES_PHASE starting")
         val context = instrumentation.targetContext
         val service = (serviceRule.bindService(Intent(context, TermService::class.java)) as TermService.LocalBinder).service
+        println("FILES_PHASE service_bound")
         val id = UUID.randomUUID().toString()
         val inputUri = Uri.Builder().scheme("content").authority("network.ght.pocketshell.test.transfer")
             .appendPath(id).appendPath("upload α.bin").build()
         val outputUri = inputUri.buildUpon().path(null).appendPath(id).appendPath("download α.bin").build()
         val bytes = ByteArray(262181) { (it % 251).toByte() }
+        println("FILES_PHASE provider_seed_begin")
         context.contentResolver.openOutputStream(inputUri, "wt")!!.use { it.write(bytes) }
+        println("FILES_PHASE provider_seed_finished")
         val receiptFile = File(context.noBackupFilesDir, "file-transfers-v1.json")
         val previousReceipt = receiptFile.takeIf { it.exists() }?.readBytes()
         receiptFile.delete()
+        println("FILES_PHASE main_setup_begin")
         val files = main {
             service.sessions.toList().forEach(service::closeSession)
             val shell = service.newSession(SessionMode.SYSTEM)
@@ -70,11 +75,14 @@ class FilesWorkflowTest {
                 timeout = "30"
             }
         }
+        println("FILES_PHASE main_setup_finished")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                println("FILES_PHASE activity_open")
                 text("Remote files")
                 text("Open folder").click()
                 ready(files)
+                println("FILES_PHASE ready " + main { files.status })
                 assertNotNull(main { files.directory })
                 assertTrue(main { files.entries!!.isEmpty() })
                 main { files.newFolder(id) }
