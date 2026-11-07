@@ -74,11 +74,30 @@ class GuestGroupNamesAndroidTest {
                 arrayOf("/bin/sh", "-c", "printf 'IDS='; id -G; groups"))
             assertTrue("Expected the missing Android group names: " + baseline.output,
                 baseline.output.contains("cannot find name for group ID"))
+            println("GROUP_NAME_BASELINE code=" + baseline.code + " output=" + baseline.output.replace("\n", "\\n"))
             val numericGroups = baseline.output.lineSequence().first { it.startsWith("IDS=") }
 
             val fixed = execute(context, Userland.prootExecArgs(context, distro,
                 "printf 'IDS='; id -G; groups; printf 'owned-storage-probe' > /root/.group-test; cat /root/.group-test"))
-            assertEquals(fixed.output, 0, fixed.code)
+            println("GROUP_NAME_FIXED code=" + fixed.code + " output=" + fixed.output.replace("\n", "\\n"))
+            if (fixed.code != 0) {
+                val base = wrapped.take(wrapperMarker - 3).toTypedArray()
+                val probes = listOf(
+                    "printf 'REDIRECT_BEFORE\n'; id -Gn >/dev/null 2>&1; printf 'REDIRECT_AFTER=%s\n' \"$?\"",
+                    "printf 'MKDIR_BEFORE\n'; mkdir -p /var/lib/pocketshell/group-map; printf 'MKDIR_AFTER=%s\n' \"$?\""
+                )
+                probes.forEachIndexed { index, command ->
+                    val result = execute(context, base + arrayOf("/bin/sh", "-xc", command))
+                    println("GROUP_NAME_PROBE " + index + " code=" + result.code + " output=" + result.output.replace("\n", "\\n"))
+                }
+                val traceArgs = wrapped.clone().apply { this[wrapperMarker - 2] = "-xc" }
+                val trace = execute(context, traceArgs)
+                println("GROUP_NAME_TRACE code=" + trace.code + " output=" + trace.output.replace("\n", "\\n"))
+                File(root, "var/lib/pocketshell/group-map").listFiles().orEmpty().filter { it.isFile }.forEach {
+                    println("GROUP_NAME_RECORD " + it.name + "=" + it.readText().replace("\n", "\\n"))
+                }
+            }
+            assertEquals("Guest exit=" + fixed.code + " output=" + fixed.output, 0, fixed.code)
             assertFalse(fixed.output, fixed.output.contains("cannot find name for group ID"))
             assertTrue(fixed.output, fixed.output.lineSequence().any { it == numericGroups })
             assertTrue(fixed.output, fixed.output.contains("owned-storage-probe"))
