@@ -27,7 +27,8 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private val commandKeyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false)
+private val commandKeyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false,
+        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password)
 
 @Composable
 fun WorkbenchDialog(

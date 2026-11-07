@@ -28,7 +28,8 @@ fun FilesPanel(service: TermService) {
     var newName by remember { mutableStateOf("") }
     val upload = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument(), state::upload)
     val download = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream"), state::export)
-    val keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false)
+    val keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false,
+        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Text("Browse and transfer files through your existing SSH connection.", style = MaterialTheme.typography.bodyMedium)

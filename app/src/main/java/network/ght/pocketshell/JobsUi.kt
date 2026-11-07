@@ -28,7 +28,8 @@ fun JobsPanel(service: TermService, onOutput: (RemoteJob) -> Unit) {
         SshShortcuts.machines.filter { it.id != "alientop" }.map(SshShortcuts::profile)).distinct()
     LaunchedEffect(state.loaded) { if (state.loaded) state.refresh() }
     var choosing by remember { mutableStateOf(false) }
-    val keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false)
+    val keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false,
+        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
