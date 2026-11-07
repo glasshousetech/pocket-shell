@@ -102,6 +102,13 @@ jobs:
             upgrade-verify.txt
           if-no-files-found: warn
 
+      - name: Retain signed device test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-signed-device-tests
+          path: app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+          if-no-files-found: error
+
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:

@@ -38,8 +38,10 @@ object Bootstrap {
             val rf = Userland.rootfsFor(distro, abi)!!
             val root = Userland.rootfsDir(context, distro)
             try {
-                if (root.exists()) root.deleteRecursively()
-                root.mkdirs()
+                synchronized(SshKeyStore.identityLock) {
+                    if (root.exists()) check(root.deleteRecursively()) { "Previous Linux files remain." }
+                    check(root.mkdirs() || root.isDirectory) { "Linux directory could not be created." }
+                }
 
                 val tarFile = File(context.cacheDir, "${distro.id}-rootfs.tar.gz")
                 onStatus("Downloading ${distro.label} ($abi)…")
@@ -55,7 +57,7 @@ object Bootstrap {
                 tarFile.delete()
 
                 onStatus("Configuring…")
-                configure(root, distro)
+                configure(context, root, distro)
 
                 // SSH is the product's primary workflow, not an optional extra.
                 // Do not mark a rootfs ready unless the core shell and ssh
@@ -75,7 +77,7 @@ object Bootstrap {
                 Userland.installedMarker(context, distro).writeText("${distro.id} $version schema=${Userland.SETUP_SCHEMA}\n")
                 Result.success(Unit)
             } catch (t: Throwable) {
-                runCatching { root.deleteRecursively() }
+                runCatching { synchronized(SshKeyStore.identityLock) { root.deleteRecursively() } }
                 Result.failure(t)
             }
         }
@@ -86,7 +88,7 @@ object Bootstrap {
             runCatching {
                 require(rootfsDirExists(context, distro)) { "Linux is not installed." }
                 onStatus("Repairing SSH and shell…")
-                configure(Userland.rootfsDir(context, distro), distro)
+                configure(context, Userland.rootfsDir(context, distro), distro)
                 provisionCore(context, distro)
                 onStatus("Refreshing developer toolkit…")
                 provisionToolkit(context, distro)
@@ -284,10 +286,9 @@ object Bootstrap {
     }
 
     /** Minimal working network + package config inside the guest. */
-    private fun configure(root: File, distro: Distro) {
+    private fun configure(context: Context, root: File, distro: Distro) {
         File(root, "etc").mkdirs()
-        // Google DNS (we deliberately avoid Cloudflare on the GHT stack).
-        File(root, "etc/resolv.conf").writeText("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
+        LinuxDns.refresh(context, root)
         File(root, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost\n")
         File(root, "etc/profile.d").mkdirs()
         File(root, "root/.ssh").apply { mkdirs(); Os.chmod(absolutePath, 448) }
