@@ -17,9 +17,11 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.render_demo_run == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +71,7 @@ jobs:
           if-no-files-found: warn
 
   instrumented-test:
+    if: github.event_name != 'workflow_dispatch' || inputs.render_demo_run == ''
     # Real behavioral gate: spawns an actual TermService + shell on a booted
     # emulator and asserts a command's output round-trips. This is the check
     # that would have caught the lateinit-before-assignment hang before it
@@ -152,7 +155,7 @@ jobs:
     # Manual-only: walks the app through a few real screens on a booted
     # emulator and uploads what it looked like. UI-coordinate/text automation
     # is more brittle than the smoke test above, so this never gates a push.
-    if: github.event_name == 'workflow_dispatch' && inputs.record_demo != true
+    if: github.event_name == 'workflow_dispatch' && inputs.record_demo != true && inputs.render_demo_run == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -228,7 +231,7 @@ jobs:
           if-no-files-found: error
 
   native-demo:
-    if: github.event_name == 'workflow_dispatch' && inputs.record_demo == true
+    if: github.event_name == 'workflow_dispatch' && inputs.record_demo == true && inputs.render_demo_run == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -248,6 +251,8 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
       - name: Prepare native recording
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
@@ -272,5 +277,38 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pocketshell-native-demo
+          path: demo-output
+          if-no-files-found: error
+
+  render-demo:
+    if: github.event_name == 'workflow_dispatch' && inputs.render_demo_run != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocketshell-native-demo
+          path: demo-output
+          run-id: ${{ inputs.render_demo_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify source and render recorded outcomes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN: ${{ inputs.render_demo_run }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          grep -Eq 'OK \(2 tests?\)' demo-output/instrument-output.txt
+          ! grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE: -[234]' demo-output/instrument-output.txt
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha > demo-output/source-revision.txt
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python3 -m pip install edge-tts==7.3.1
+          python3 scripts/demo/narrate.py demo-output
+          python3 scripts/demo/render.py demo-output "$(cat demo-output/source-revision.txt)"
+      - name: Upload narrated native review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketshell-narrated-review
           path: demo-output
           if-no-files-found: error
