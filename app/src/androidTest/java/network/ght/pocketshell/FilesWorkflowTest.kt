@@ -42,6 +42,14 @@ class FilesWorkflowTest {
         }
         return requireNotNull(device.findObject(By.text(label)))
     }
+    private fun scrollTo(label: String): UiObject2 {
+        waitFor("Missing file content: " + label) {
+            if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
+            device.hasObject(By.text(label)) || device.hasObject(By.scrollable(true))
+        }
+        if (!device.hasObject(By.text(label))) UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text(label))
+        return text(label)
+    }
     private fun ready(state: FilesWorkbench) {
         waitFor("File operation did not complete: " + main { state.error ?: state.status }) { main { !state.busy } }
         assertNull(main { state.error })
@@ -113,8 +121,7 @@ class FilesWorkflowTest {
                 assertEquals(FileTransfer.Phase.COMPLETE, main { files.transfers.first().phase })
                 assertEquals(bytes.size.toLong(), main { files.transfers.first().size })
                 val firstIdentity = main { files.transfers.first().id }
-                UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text("upload α.bin"))
-                text("upload α.bin")
+                scrollTo("upload α.bin")
                 demoBeat("upload")
 
                 scenario.recreate()
@@ -125,8 +132,7 @@ class FilesWorkflowTest {
                 ready(files)
                 val conflict = main { files.transfers.first() }
                 assertEquals(FileTransfer.Phase.CONFLICT, conflict.phase)
-                UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text("Replace and keep backup"))
-                text("Replace and keep backup").click()
+                scrollTo("Replace and keep backup").click()
                 text("Replace this file?")
                 demoBeat("conflict")
                 text("Replace with backup").click()
@@ -143,8 +149,7 @@ class FilesWorkflowTest {
                 ready(files)
                 assertEquals("Saved to your phone and checksum verified.", main { files.status })
                 assertArrayEquals(bytes, context.contentResolver.openInputStream(outputUri)!!.use { it.readBytes() })
-                UiScrollable(UiSelector().scrollable(true)).flingToBeginning(6)
-                text("Saved to your phone and checksum verified.")
+                scrollTo("Saved to your phone and checksum verified.")
                 demoBeat("export")
                 val screenshots = File(context.filesDir, "screenshots").apply { mkdirs() }
                 device.takeScreenshot(File(screenshots, "remote-files-verified.png"))
