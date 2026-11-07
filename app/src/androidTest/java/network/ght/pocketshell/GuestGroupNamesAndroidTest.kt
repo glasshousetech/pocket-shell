@@ -93,6 +93,16 @@ class GuestGroupNamesAndroidTest {
                 println("GROUP_NAME_SYSCALLS code=" + syscalls.code + " output=" + syscalls.output.replace("\n", "\\n"))
                 assertEquals("Native compatibility probe: " + syscalls.output, 0, syscalls.code)
                 assertTrue(syscalls.output, syscalls.output.contains("POCKETSHELL_SYSCALLS_OK"))
+                val forkProbe = File(root, "tmp/pocketshell-fork-regs")
+                instrumentation.context.assets.open("fork-regs-x86_64").use { input ->
+                    forkProbe.outputStream().use { input.copyTo(it) }
+                }
+                assertTrue("Owned fork probe must be executable", forkProbe.setExecutable(true))
+                val forkRegs = execute(context, wrapped.take(wrapperMarker - 3).toTypedArray() +
+                    arrayOf("/tmp/pocketshell-fork-regs"))
+                println("FORK_REGISTERS distro=" + distro.id + " code=" + forkRegs.code + " output=" + forkRegs.output)
+                assertEquals("Parent/child fork registers: " + forkRegs.output, 0, forkRegs.code)
+
             }
 
             val fixed = execute(context, Userland.prootExecArgs(context, distro,
