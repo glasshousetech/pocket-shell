@@ -9,6 +9,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.ServiceTestRule
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -40,15 +42,20 @@ class WorkbenchUiTest {
         fail("Timed out: " + label)
     }
 
-    private fun text(value: String): UiObject2 {
-        if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
-        return device.wait(Until.findObject(By.text(value)), 10000) ?: error("Not visible: " + value)
+    private fun freshNode(selector: BySelector, label: String): UiObject2 {
+        val deadline = SystemClock.uptimeMillis() + 10000
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
+            try {
+                device.findObject(selector)?.let { return it }
+            } catch (_: StaleObjectException) { /* Reacquire a read; never replay an input. */ }
+            SystemClock.sleep(40)
+        }
+        error("Not visible: " + label)
     }
 
-    private fun desc(value: String): UiObject2 {
-        if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
-        return device.wait(Until.findObject(By.desc(value)), 10000) ?: error("Not accessible: " + value)
-    }
+    private fun text(value: String): UiObject2 = freshNode(By.text(value), value)
+    private fun desc(value: String): UiObject2 = freshNode(By.desc(value), value)
 
     private fun fields(): List<UiObject2> {
         if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
@@ -182,6 +189,7 @@ class WorkbenchUiTest {
                     // Capture before ActivityScenario closes the app on exception.
                     val shots = File(context.filesDir, "screenshots").apply { mkdirs() }
                     device.takeScreenshot(File(shots, "workbench-failure.png"))
+                    if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
                     device.dumpWindowHierarchy(File(shots, "workbench-failure.xml"))
                     throw failure
                 }
