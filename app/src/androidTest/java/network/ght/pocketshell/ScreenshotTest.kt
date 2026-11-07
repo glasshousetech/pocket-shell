@@ -62,8 +62,11 @@ class ScreenshotTest {
                 // without a working Linux install. Capture the failure and stop rather
                 // than filling the artifact with identical pictures of the gate.
                 capture("setup_failed")
-                Log.w(TAG, "no terminal after setup — see the setup_failed capture")
-                return@use
+                device.dumpWindowHierarchy(File(outDir, "setup-failure.xml"))
+                File(outDir, "setup-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
+                val messages = device.findObjects(By.pkg(instrumentation.targetContext.packageName))
+                    .mapNotNull { it.text }.filter { it.isNotBlank() }
+                throw AssertionError("Fresh Alpine setup did not reach a terminal: " + messages.joinToString(" | "))
             }
             Thread.sleep(1_500) // let the shell prompt actually render
             capture("launch_shell")

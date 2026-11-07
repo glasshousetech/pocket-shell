@@ -21,12 +21,18 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
+import kotlinx.coroutines.runBlocking
 
 /** Real Android/proot regression using a pinned minimal guest in an isolated app-owned directory. */
 @RunWith(AndroidJUnit4::class)
 class GuestGroupNamesAndroidTest {
     @Test
-    fun inheritedGroupsResolveBeforeCommandsAndPtyStartup() {
+    fun inheritedGroupsResolveBeforeCommandsAndPtyStartup() = verifyGuest(Distro.Ubuntu)
+
+    @Test
+    fun alpineGroupsAndCompleteToolkitInstallWork() = verifyGuest(Distro.Alpine)
+
+    private fun verifyGuest(distro: Distro) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val realContext = instrumentation.targetContext
         val fixture = File(realContext.cacheDir, "group-name-test-" + UUID.randomUUID()).apply { mkdirs() }
@@ -38,7 +44,6 @@ class GuestGroupNamesAndroidTest {
         }
         var terminal: TerminalSession? = null
         try {
-            val distro = Distro.Ubuntu
             val abi = requireNotNull(Userland.supportedAbi(distro))
             val descriptor = requireNotNull(Userland.rootfsFor(distro, abi))
             val archive = File(context.cacheDir, "rootfs.tar.gz")
@@ -72,7 +77,7 @@ class GuestGroupNamesAndroidTest {
             // Same packaged proot/root/env, bypassing only the repair to demonstrate the original failure.
             val baseline = execute(context, wrapped.take(wrapperMarker - 3).toTypedArray() +
                 arrayOf("/bin/sh", "-c", "printf 'IDS='; id -G; groups"))
-            assertTrue("Expected the missing Android group names: " + baseline.output,
+            if (distro == Distro.Ubuntu) assertTrue("Expected the missing Android group names: " + baseline.output,
                 baseline.output.contains("cannot find name for group ID"))
             println("GROUP_NAME_BASELINE code=" + baseline.code + " output=" + baseline.output.replace("\n", "\\n"))
             val numericGroups = baseline.output.lineSequence().first { it.startsWith("IDS=") }
@@ -147,6 +152,23 @@ class GuestGroupNamesAndroidTest {
             val exported = DiagnosticLog.read(context)
             assertTrue(exported, exported.contains("android_group_registered"))
             assertFalse(exported, exported.contains("owned-storage-probe"))
+            if (distro == Distro.Alpine) {
+                val scriptField = Userland::class.java.getDeclaredField("groupStartupScript").apply { isAccessible = true }
+                val originalScript = scriptField.get(Userland) as String
+                try {
+                    scriptField.set(Userland, "set -x\n" + originalScript)
+                    val installed = runBlocking {
+                        Bootstrap.repair(context, distro) { println("ALPINE_INSTALL_STATUS " + it) }
+                    }
+                    println("ALPINE_INSTALL_RESULT success=" + installed.isSuccess + " error=" + installed.exceptionOrNull()?.message)
+                    assertTrue("Alpine toolchain: " + installed.exceptionOrNull()?.message, installed.isSuccess)
+                    val health = runBlocking { Bootstrap.healthCheck(context) }
+                    assertTrue("Installed toolchain health: " + health.exceptionOrNull()?.message, health.isSuccess)
+                    println("ALPINE_INSTALL_HEALTH " + health.getOrThrow())
+                } finally {
+                    scriptField.set(Userland, originalScript)
+                }
+            }
             println("GROUP_NAME_FIXTURE abi=" + abi + " numeric=" + numericGroups +
                 " registered=" + events.size + " pty=true repeatedExit=" + repeated.code)
             println("GROUP_NAME_BASELINE " + baseline.output.replace("\n", "\\n"))
