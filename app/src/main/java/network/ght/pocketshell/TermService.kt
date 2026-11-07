@@ -487,6 +487,11 @@ class TermService : Service() {
             resumeCommand ?: entry.connectionProfile?.command(tabId) ?: entry.startupCommand,
             entry.connectionProfile, mutableStateOf(entry.customName), mutableStateOf(entry.color), entry.remoteWorkspace)
         sessions.add(holder)
+        // A restored terminal is immediately visible. Its service selection must
+        // agree before Actions, hardware shortcuts, or saved-command routing run.
+        if (sessions.none { it.id == selectedSessionId.value }) {
+            selectedSessionId.value = sessions.first().id
+        }
         applyPowerPolicy()
         return holder
     }

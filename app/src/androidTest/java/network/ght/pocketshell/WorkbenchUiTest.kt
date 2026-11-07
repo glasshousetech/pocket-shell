@@ -204,6 +204,50 @@ class WorkbenchUiTest {
         }
     }
 
+    @Test fun coldRestoredTabCanSearchWithoutRetappingItsHeader() {
+        assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+        val service = (serviceRule.bindService(Intent(context, TermService::class.java)) as TermService.LocalBinder).service
+        if (android.os.Build.VERSION.SDK_INT >= 33) device.executeShellCommand("pm grant " + context.packageName + " android.permission.POST_NOTIFICATIONS")
+        val marker = "RESTORED_ORIGIN_MARKER"
+        val restored = main {
+            service.sessions.toList().forEach(service::closeSession)
+            service.selectedSessionId.value = null // A fresh service, before any tab is tapped.
+            service.workbench.close()
+            service.workbench.outputQuery = ""
+            val restore = TermService::class.java.getDeclaredMethod("restoreSession", SessionStore.Saved::class.java).apply { isAccessible = true }
+            fun restoreFixture(name: String, transcript: String): TermSession {
+                val shell = restore.invoke(service, SessionStore.Saved(SessionMode.SYSTEM, name, null, transcript)) as TermSession
+                // Use the emulator's real toybox PTY with the normal workspace UI.
+                return TermSession(shell.id, shell.label, shell.alive, shell.session, SessionMode.LINUX, shell.tabId).also {
+                    service.sessions[service.sessions.indexOf(shell)] = it
+                    service.renameSession(it, name)
+                }
+            }
+            val first = restoreFixture("Restored terminal", marker + "\n")
+            restoreFixture("Restored sibling", "SIBLING_ONLY\n")
+            first
+        }
+        try {
+            assertEquals("Restoring siblings must retain the visible first tab", restored.id, main { service.selectedSessionId.value })
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                text("Actions").click()
+                text("Search output").click()
+                setField("Find in output", 0, marker)
+                text("Match 1 of 1")
+                assertNull(main { service.workbench.error })
+                text("Copy matching line").click()
+                assertEquals(marker, main { Clip.paste() })
+                scenario.recreate()
+                text("Match 1 of 1")
+                assertEquals(restored.id, main { service.workbench.targetId })
+                desc("Close tools").click()
+            }
+        } finally {
+            main { service.workbench.close(); service.sessions.toList().forEach(service::closeSession) }
+            device.pressBack()
+        }
+    }
+
     @Test fun corruptCommandLibraryCannotBeOverwrittenBySaveOrDelete() {
         assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         val file = File(context.filesDir, "commands-v1.json")
