@@ -5,7 +5,7 @@ import java.util.UUID
 
 /** UI drafts stay with the live service, never in saved-instance Bundles or diagnostic logs. */
 class WorkbenchState {
-    enum class Page { PALETTE, COMMANDS, OUTPUT, DIAGNOSIS }
+    enum class Page { PALETTE, COMMANDS, OUTPUT, DIAGNOSIS, WORKSPACES }
     var page by mutableStateOf<Page?>(null)
     var query by mutableStateOf("")
     var commands by mutableStateOf<List<SavedCommand>>(emptyList())
@@ -28,6 +28,13 @@ class WorkbenchState {
     var diagnosticTimeout by mutableStateOf("120")
     var diagnosticBusy by mutableStateOf(false)
     var diagnosis by mutableStateOf<ConnectionDiagnosis?>(null)
+
+    var workspaceProfile by mutableStateOf<SshProfile?>(null)
+    var workspaceTimeout by mutableStateOf("120")
+    var workspaceBusy by mutableStateOf(false)
+    var remoteWorkspaces by mutableStateOf<List<RemoteWorkspace>?>(null)
+    var workspaceError by mutableStateOf<String?>(null)
+    var handoffCopied by mutableStateOf<String?>(null)
 
     fun newCommand() {
         editing = SavedCommand(UUID.randomUUID().toString(), "", "")

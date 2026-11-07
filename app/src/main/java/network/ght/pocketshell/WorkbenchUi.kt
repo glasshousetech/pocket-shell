@@ -33,6 +33,7 @@ private val commandKeyboard = KeyboardOptions(capitalization = KeyboardCapitaliz
 fun WorkbenchDialog(
     service: TermService,
     onConnect: (SshProfile) -> Unit,
+    onResumeWorkspace: (SshProfile, RemoteWorkspace) -> Unit,
     onAction: (String) -> Unit,
     onRefreshOutput: () -> Unit,
     onInsert: (String) -> Unit,
@@ -44,6 +45,7 @@ fun WorkbenchDialog(
         WorkbenchState.Page.COMMANDS -> if (state.editing != null) "Edit command" else if (state.using != null) "Use command" else "Saved commands"
         WorkbenchState.Page.OUTPUT -> "Search output"
         WorkbenchState.Page.DIAGNOSIS -> "Connection check"
+        WorkbenchState.Page.WORKSPACES -> "Remote workspaces"
     }
     Dialog(onDismissRequest = state::close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -66,6 +68,7 @@ fun WorkbenchDialog(
                             WorkbenchState.Page.COMMANDS -> CommandLibrary(service, onInsert)
                             WorkbenchState.Page.OUTPUT -> SearchOutput(state, onRefreshOutput)
                             WorkbenchState.Page.DIAGNOSIS -> DiagnosisPanel(service)
+                            WorkbenchState.Page.WORKSPACES -> RemoteWorkspacePanel(service, onConnect, onResumeWorkspace)
                         }
                     }
                 }
@@ -80,6 +83,7 @@ fun WorkbenchDialog(
         "Search output" to "Find and copy text from this terminal",
         "Saved commands" to "Reusable commands with fill-in parameters",
         "Connection check" to "Diagnose SSH without changing server trust",
+        "Remote workspaces" to "Resume a running session or hand it to your PC",
         "Connections" to "Open or edit your server library",
         "New tab" to "Start another Linux terminal",
         "Text / voice" to "Review a draft before inserting",
@@ -294,6 +298,72 @@ fun WorkbenchDialog(
         items(profiles) { profile ->
             ListItem(headlineContent = { Text(profile.name) }, supportingContent = { Text(profile.host) },
                 modifier = Modifier.fillMaxWidth().clickable(enabled = !state.diagnosticBusy) { service.checkConnection(profile) })
+        }
+        state.connectionError?.let { error -> item {
+            Text(error, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { service.loadWorkbench() }) { Text("Retry connections") }
+        } }
+    }
+}
+
+
+@Composable private fun RemoteWorkspacePanel(
+    service: TermService,
+    onConnect: (SshProfile) -> Unit,
+    onResume: (SshProfile, RemoteWorkspace) -> Unit,
+) {
+    val state = service.workbench
+    val profiles = (state.connections.map { it.profile } + listOf(SshProfiles.agentDroplet) + SshShortcuts.machines.map(SshShortcuts::profile)).distinct()
+    var choosingHost by remember { mutableStateOf(false) }
+    val profile = state.workspaceProfile
+    LazyColumn {
+        item {
+            Text("Resume an existing tmux terminal. Other connected clients and sibling workspaces stay running.")
+            Box {
+                OutlinedButton(onClick = { choosingHost = true }, enabled = !state.workspaceBusy, modifier = Modifier.fillMaxWidth()) {
+                    Text(profile?.name ?: "Choose a host")
+                }
+                DropdownMenu(expanded = choosingHost, onDismissRequest = { choosingHost = false }) {
+                    profiles.forEach { host -> DropdownMenuItem(text = { Text(host.name + " · " + host.host) }, onClick = {
+                        state.workspaceProfile = host
+                        state.remoteWorkspaces = null
+                        state.workspaceError = null
+                        state.handoffCopied = null
+                        choosingHost = false
+                    }) }
+                }
+            }
+            if (profile?.remoteCommand?.isNotBlank() == true) {
+                Text("GHT relay workspaces retain their existing onward SSH connection.", style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedTextField(state.workspaceTimeout, { state.workspaceTimeout = it }, enabled = !state.workspaceBusy,
+                label = { Text("Discovery timeout in seconds") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Button(onClick = { profile?.let(service::discoverWorkspaces) }, enabled = profile != null && !state.workspaceBusy,
+                modifier = Modifier.fillMaxWidth()) { Text(if (state.remoteWorkspaces == null) "Find workspaces" else "Refresh workspaces") }
+            if (state.workspaceBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            state.workspaceError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
+            if (state.remoteWorkspaces?.isEmpty() == true) Text("No running tmux workspaces were found on this host.")
+            if (profile != null) TextButton(onClick = { state.close(); onConnect(profile) }, enabled = !state.workspaceBusy) { Text("Open SSH") }
+        }
+        items(state.remoteWorkspaces.orEmpty(), key = { "${it.serverPid}-${it.serverStarted}-${it.id}-${it.created}" }) { workspace ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Text(workspace.name, style = MaterialTheme.typography.titleMedium)
+                Text("${workspace.windows} windows · ${workspace.clients} connected clients", style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { profile?.let { onResume(it, workspace) } }, enabled = profile != null && !state.workspaceBusy,
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "Open remote " + workspace.name }) { Text("Open") }
+                    TextButton(onClick = {
+                        runCatching { RemoteWorkspaces.attachCommand(requireNotNull(profile), workspace, portable = true) }
+                            .onSuccess { Clip.copy(it); state.handoffCopied = workspace.id; state.workspaceError = null }
+                            .onFailure { state.workspaceError = it.message ?: "Could not prepare this handoff." }
+                    }, enabled = profile != null && !state.workspaceBusy,
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "Copy PC handoff " + workspace.name }) {
+                        Text(if (state.handoffCopied == workspace.id) "PC command copied" else "Copy PC handoff")
+                    }
+                }
+                if (state.handoffCopied == workspace.id) Text("Paste into PowerShell or a POSIX terminal. The PC uses its own SSH credentials.", style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider()
+            }
         }
         state.connectionError?.let { error -> item {
             Text(error, color = MaterialTheme.colorScheme.error)

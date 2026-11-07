@@ -57,10 +57,10 @@ vtt = ["WEBVTT", ""]
 for cue in cues:
     vtt += [f"{clock(cue['start'])} --> {clock(cue['end'])}", html.escape(cue["text"]), ""]
 (work / "captions.vtt").write_text("\n".join(vtt), encoding="utf-8")
-ass = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 720", "PlayResY: 1488",
+ass = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 720", "PlayResY: 1584",
        "[V4+ Styles]",
        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-       "Style: Default,DejaVu Sans,30,&H00FFFFFF,&H00FFFFFF,&H00141C2A,&H00141C2A,0,0,0,0,100,100,0,0,1,1,0,2,30,30,24,1",
+       "Style: Default,DejaVu Sans,30,&H00FFFFFF,&H00FFFFFF,&H00141C2A,&H00141C2A,0,0,0,0,100,100,0,0,1,1,0,2,30,30,100,1",
        "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
 for cue in cues:
     text = cue["text"].replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
@@ -68,7 +68,7 @@ for cue in cues:
 (work / "captions.ass").write_text("\n".join(ass), encoding="utf-8")
 audio_filters.append("".join(f"[a{i}]" for i in range(len(chapters))) +
                      f"amix=inputs={len(chapters)}:normalize=0,apad=whole_dur={duration},loudnorm=I=-16:TP=-1.5:LRA=11[voice]")
-filters = (f"trim=start={start}:end={end},setpts=PTS-STARTPTS,pad=iw:ih+208:0:80:color=0x0c1424,"
+filters = (f"trim=start={start}:end={end},setpts=PTS-STARTPTS,fps=30,pad=iw:ih+304:0:80:color=0x0c1424,"
            "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='PocketShell — save, run, find':fontcolor=white:fontsize=28:x=24:y=18,"
            f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Android emulator · candidate {revision[:8]}':fontcolor=0xa9bad1:fontsize=18:x=24:y=53,"
            "ass=captions.ass")
@@ -115,7 +115,7 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #6bd
 small{color:#afc3de}#status{min-height:1.5em}summary{cursor:pointer}p{margin:12px 0}@media(max-width:760px){main{padding:18px}.layout{grid-template-columns:1fr}video{max-height:75vh}}</style>
 <main><h1>Save it. Run it. Find the result.</h1><p class="lead">A real PocketShell command workflow, recorded continuously on an isolated Android emulator. This candidate is not a claim about the version installed on your Fold.</p>
 <div class="layout"><div><video id="demo" controls playsinline preload="metadata" poster="poster.png" aria-label="Narrated PocketShell command workflow"><source src="PocketShell-demo.mp4" type="video/mp4"><track src="captions.vtt" kind="captions" srclang="en" label="English captions"></video>
-<div class="controls"><button id="play">Play demo</button><label>Speed <select id="speed"><option value=".75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label></div>
+<p id="spoken-caption" style="min-height:3em;color:#edf4ff" aria-live="off"></p><div class="controls"><button id="play">Play demo</button><label>Speed <select id="speed"><option value=".75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label></div>
 <p id="status" role="status"></p></div><aside><h2>Jump to a step</h2><nav aria-label="Demo chapters">__BUTTONS__</nav>
 <p><small>Narrator: __NARRATOR__.<br>Candidate: __REVISION__.<br>Captions are included below the app image.</small></p>
 <p><a href="PocketShell-demo.mp4" download>Download video</a> · <a href="captions.vtt" download>Captions</a> · <a href="transcript.txt">Transcript</a></p></aside></div>
@@ -123,7 +123,7 @@ small{color:#afc3de}#status{min-height:1.5em}summary{cursor:pointer}p{margin:12p
 <script>const v=document.getElementById('demo'),status=document.getElementById('status'),play=document.getElementById('play');
 play.onclick=()=>{if(v.paused)v.play().catch(e=>status.textContent='Playback needs attention: '+e.message);else v.pause()};
 v.onplay=()=>{play.textContent='Pause demo';status.textContent='Playing'};v.onpause=()=>{play.textContent='Play demo';status.textContent=v.ended?'Finished':'Paused'};
-v.onended=()=>status.textContent='Finished';v.onerror=()=>status.textContent='The video could not load. Open the review folder with its media files.';
+v.onended=()=>status.textContent='Finished';v.onseeked=()=>status.textContent=v.paused?'Paused':'Playing';const narrationTrack=v.textTracks[0];narrationTrack.mode='hidden';narrationTrack.oncuechange=()=>document.getElementById('spoken-caption').textContent=Array.from(narrationTrack.activeCues||[]).map(c=>c.text).join(' ');v.onerror=()=>status.textContent='The video could not load. Open the review folder with its media files.';
 document.getElementById('speed').onchange=e=>v.playbackRate=Number(e.target.value);
 document.querySelectorAll('[data-time]').forEach(b=>b.onclick=()=>{v.currentTime=Number(b.dataset.time);v.play().catch(e=>status.textContent=e.message)});
 </script></html>"""

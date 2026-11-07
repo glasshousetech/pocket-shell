@@ -39,6 +39,7 @@ class TermSession(
     val connectionProfile: SshProfile? = null,
     val customName: MutableState<String?> = mutableStateOf(null),
     val color: MutableState<String?> = mutableStateOf(null),
+    val remoteWorkspace: RemoteWorkspace? = null,
 ) {
     val displayName: String get() = customName.value ?: label.value
     val startupCommand: String? get() = reconnectCommand
@@ -247,14 +248,61 @@ class TermService : Service() {
         return START_STICKY
     }
 
+    fun discoverWorkspaces(profile: SshProfile) {
+        if (workbench.workspaceBusy) return
+        val timeout = workbench.workspaceTimeout.toLongOrNull()
+        if (timeout == null || timeout <= 0) { workbench.workspaceError = "Enter a positive timeout in seconds."; return }
+        workbench.workspaceBusy = true
+        workbench.workspaceProfile = profile
+        workbench.remoteWorkspaces = null
+        workbench.workspaceError = null
+        workbench.handoffCopied = null
+        DiagnosticLog.record(this, "remote_workspace", "discovery_started")
+        operations.launch {
+            try {
+                val result = GuestCommand.run(applicationContext, RemoteWorkspaces.listCommand(profile, timeout), timeout)
+                workbench.remoteWorkspaces = RemoteWorkspaces.parse(result, profile)
+                DiagnosticLog.record(applicationContext, "remote_workspace", "discovery_succeeded", exitCode = result.exitCode)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                workbench.workspaceError = when (failure) {
+                    is IllegalArgumentException, is IllegalStateException -> failure.message
+                    else -> "The workspace list could not be read. Check the connection and refresh."
+                }
+                DiagnosticLog.record(applicationContext, "remote_workspace", "discovery_failed", failure.javaClass.simpleName)
+            } finally { workbench.workspaceBusy = false }
+        }
+    }
+
+    fun resumeWorkspace(profile: SshProfile, workspace: RemoteWorkspace): TermSession {
+        RemoteWorkspaces.attachCommand(profile, workspace) // Validate before changing tabs.
+        val existing = sessions.firstOrNull { holder ->
+            val connection = holder.connectionProfile
+            connection != null && connection.host.equals(profile.host, ignoreCase = true) &&
+                connection.port == profile.port && connection.user == profile.user &&
+                holder.remoteWorkspace?.sameProcess(workspace) == true
+        }
+        val holder = if (existing != null) {
+            if (existing.alive.value) existing else reconnectSession(existing)
+        } else newSession(SessionMode.LINUX, connectionProfile = profile, customName = workspace.name, remoteWorkspace = workspace)
+        selectedSessionId.value = holder.id
+        workbench.close()
+        DiagnosticLog.record(this, "remote_workspace", "attachment_started", tabId = holder.tabId)
+        return holder
+    }
+
     fun newSession(mode: SessionMode, startupCommand: String? = null, tabId: String = TabIdentity.create(),
-        connectionProfile: SshProfile? = null, customName: String? = null, color: String? = null): TermSession {
+        connectionProfile: SshProfile? = null, customName: String? = null, color: String? = null,
+        remoteWorkspace: RemoteWorkspace? = null): TermSession {
         check(linuxRemovalState.value != RemovalState.RUNNING) { "Linux removal is still running." }
         linuxRemovalState.value = RemovalState.IDLE
         TabIdentity.requireValid(tabId)
         require(sessions.none { it.tabId == tabId }) { "Tab identity is already in use." }
         DiagnosticLog.record(this, "session", "create_attempt", tabId = tabId)
-        val command = connectionProfile?.command(tabId) ?: startupCommand
+        require(remoteWorkspace == null || (connectionProfile != null && mode == SessionMode.LINUX))
+        val command = remoteWorkspace?.let { "exec " + RemoteWorkspaces.attachCommand(requireNotNull(connectionProfile), it) }
+            ?: connectionProfile?.command(tabId) ?: startupCommand
         val id = nextId++
         val prefix = if (mode == SessionMode.LINUX) "linux" else "sh"
         val label = mutableStateOf("$prefix $id")
@@ -269,7 +317,7 @@ class TermService : Service() {
             onFinished = { s -> alive.value = false; DiagnosticLog.record(this, "session", "process_exit", tabId = tabId, exitCode = s.exitStatus); refreshNotification() },
         )
         val holder = TermSession(id, label, alive, session, mode, tabId, command, connectionProfile,
-            mutableStateOf(TabNames.normalize(customName)), mutableStateOf(TabColors.byId(color)?.id))
+            mutableStateOf(TabNames.normalize(customName)), mutableStateOf(TabColors.byId(color)?.id), remoteWorkspace)
         sessions.add(holder)
         DiagnosticLog.record(this, "session", "tab_registered", tabId = tabId)
         refreshNotification()
@@ -286,7 +334,7 @@ class TermService : Service() {
         sessions.removeAt(index)
         return try {
             val replacement = newSession(holder.mode, command, holder.tabId, holder.connectionProfile,
-                holder.customName.value, holder.color.value)
+                holder.customName.value, holder.color.value, holder.remoteWorkspace)
             replacement.label.value = holder.label.value
             sessions.remove(replacement)
             sessions.add(index, replacement)
@@ -404,6 +452,9 @@ class TermService : Service() {
     private fun restoreSession(entry: SessionStore.Saved): TermSession {
         val tabId = entry.tabId.takeIf { id -> sessions.none { it.tabId == id } } ?: TabIdentity.create()
         val id = nextId++
+        val resumeCommand = entry.remoteWorkspace?.let { workspace ->
+            entry.connectionProfile?.let { "exec " + RemoteWorkspaces.attachCommand(it, workspace) }
+        }
         val fallbackPrefix = if (entry.mode == SessionMode.LINUX) "linux" else "sh"
         val label = mutableStateOf(entry.title.ifBlank { "$fallbackPrefix $id" })
         val alive = mutableStateOf(true)
@@ -411,6 +462,7 @@ class TermService : Service() {
             this,
             entry.mode,
             cwd = entry.cwd,
+            startupCommand = resumeCommand,
             tabId = tabId,
             onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, entry.mode, s) },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
@@ -421,25 +473,26 @@ class TermService : Service() {
         // emulator already exists. That lets us inject the saved scrollback
         // before any real UI has attached.
         session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
-        injectRestoredTranscript(session, entry.transcript)
+        injectRestoredTranscript(session, entry.transcript, entry.restoreNotice ?:
+            if (resumeCommand != null) "Reconnecting to the saved remote workspace; output above is historical." else null)
 
         val holder = TermSession(id, label, alive, session, entry.mode, tabId,
-            entry.connectionProfile?.command(tabId) ?: entry.startupCommand,
-            entry.connectionProfile, mutableStateOf(entry.customName), mutableStateOf(entry.color))
+            resumeCommand ?: entry.connectionProfile?.command(tabId) ?: entry.startupCommand,
+            entry.connectionProfile, mutableStateOf(entry.customName), mutableStateOf(entry.color), entry.remoteWorkspace)
         sessions.add(holder)
         applyPowerPolicy()
         return holder
     }
 
     /** Feeds saved scrollback text through the emulator as if it were program output. */
-    private fun injectRestoredTranscript(session: TerminalSession, transcript: String) {
-        if (transcript.isBlank()) return
+    private fun injectRestoredTranscript(session: TerminalSession, transcript: String, notice: String? = null) {
+        if (transcript.isBlank() && notice == null) return
         // transcriptText only ever contains rendered characters (no escape codes),
         // but it joins rows with bare '\n'; the emulator needs '\r\n' to actually
         // return to column 0, or replayed lines drift diagonally across the screen.
         val normalized = transcript.replace("\r\n", "\n").replace("\n", "\r\n")
         val marker = "[2m── session restored (best-effort history — not a live process) ──[0m\r\n\r\n"
-        val text = "$normalized\r\n$marker"
+        val text = "$normalized\r\n$marker" + (notice?.let { it + "\r\n" } ?: "")
         val bytes = text.toByteArray(Charsets.UTF_8)
         runCatching { session.emulator?.append(bytes, bytes.size) }
     }
@@ -457,6 +510,7 @@ class TermService : Service() {
                 color = holder.color.value,
                 startupCommand = holder.reconnectCommand,
                 connectionProfile = holder.connectionProfile,
+                remoteWorkspace = holder.remoteWorkspace,
                 title = holder.label.value,
                 cwd = if (holder.mode == SessionMode.SYSTEM) {
                     runCatching { holder.session.cwd }.getOrNull()
@@ -464,7 +518,7 @@ class TermService : Service() {
                     null // proot's own -w /root always wins; host cwd isn't meaningful.
                 },
                 transcript = runCatching {
-                    TerminalSnapshot.tail(holder.session)
+                    holder.session.emulator?.screen?.transcriptText.orEmpty()
                 }.getOrNull().orEmpty(),
             )
         }

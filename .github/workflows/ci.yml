@@ -51,6 +51,15 @@ jobs:
       - name: Validate shared theme catalog
         run: python3 scripts/generate-themes.py --check
 
+      - name: Prepare real workspace test tools
+        run: |
+          if ! command -v tmux >/dev/null || ! command -v script >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y tmux util-linux
+          fi
+          tmux -V
+          command -v script
+
       - name: Build debug APK
         run: |
           chmod +x ./gradlew
@@ -123,7 +132,7 @@ jobs:
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -r -w -e class network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
+            adb shell am instrument -r -w -e class network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest network.ght.pocketshell.test/androidx.test.runner.AndroidJUnitRunner | tee instrument-output.txt
             adb logcat -d -s System.out:I PocketShell.InputTiming:D > input-timings.txt
             mkdir -p app/build/outputs/theme-screenshots
             adb exec-out run-as network.ght.pocketshell tar cf - -C /data/data/network.ght.pocketshell/files screenshots > app/build/outputs/theme-screenshots.tar
@@ -276,6 +285,7 @@ jobs:
           cp scripts/demo/story.json demo-output/script.json
           python3 scripts/demo/narrate.py demo-output
           python3 scripts/demo/render.py demo-output "${{ github.sha }}"
+          python3 scripts/demo/package-review.py demo-output
       - name: Upload original recording and narrated review
         if: always()
         uses: actions/upload-artifact@v4
@@ -309,6 +319,7 @@ jobs:
           python3 -m pip install edge-tts==7.3.1
           python3 scripts/demo/narrate.py demo-output
           python3 scripts/demo/render.py demo-output "$(cat demo-output/source-revision.txt)"
+          python3 scripts/demo/package-review.py demo-output
       - name: Upload narrated native review
         if: always()
         uses: actions/upload-artifact@v4

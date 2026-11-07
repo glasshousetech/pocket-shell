@@ -502,6 +502,18 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     if (service.workbench.page != null) {
         WorkbenchDialog(service,
             onConnect = ::connect,
+            onResumeWorkspace = { profile, workspace ->
+                if (Userland.installedDistro(ctx) == null) {
+                    service.workbench.error = "Install Linux in Settings before opening a remote workspace."
+                } else runCatching { service.resumeWorkspace(profile, workspace) }
+                    .onSuccess { holder ->
+                        termViewRef.value?.let { view ->
+                            view.attachSession(holder.session)
+                            view.onScreenUpdated()
+                            viewClient.showKeyboard()
+                        }
+                    }.onFailure { service.workbench.error = it.message ?: "The workspace could not be opened." }
+            },
             onRefreshOutput = ::captureOutput,
             onInsert = { command ->
                 val state = service.workbench
@@ -528,6 +540,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     }
                     "Saved commands" -> { state.page = WorkbenchState.Page.COMMANDS; state.error = null }
                     "Connection check" -> { state.page = WorkbenchState.Page.DIAGNOSIS; state.error = null }
+                    "Remote workspaces" -> {
+                        if (state.workspaceProfile == null) state.workspaceProfile = sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile
+                        state.page = WorkbenchState.Page.WORKSPACES; state.error = null
+                    }
                     else -> {
                         state.close()
                         when (action) {
