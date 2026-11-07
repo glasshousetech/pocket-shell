@@ -6,7 +6,7 @@ suite="${POCKET_DEMO_SUITE:-workbench}"
 hold_ms=15000
 if [[ "$suite" == workbench ]]; then hold_ms=10000; fi
 case "$suite" in
-  workbench) test_class=WorkbenchUiTest; expected_tests=2 ;;
+  workbench) test_class=WorkbenchUiTest; expected_tests=3 ;;
   handoff) test_class=RemoteWorkspaceUiTest; expected_tests=1 ;;
   files) test_class=FilesWorkflowTest; expected_tests=1 ;;
   jobs) test_class=JobsWorkflowTest; expected_tests=2 ;;
