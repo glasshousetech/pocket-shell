@@ -13,13 +13,11 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Installs a Linux userland: download (sha256-pinned) -> extract -> configure.
@@ -28,6 +26,8 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object Bootstrap {
     private const val TAG = "PocketShell.Bootstrap"
+    // Full package sets can take many minutes on slower devices and networks.
+    private const val PACKAGE_TIMEOUT_SECONDS = 3600L
 
     suspend fun install(context: Context, distro: Distro, onStatus: (String) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -211,7 +211,8 @@ object Bootstrap {
                 "${Userland.ubuntuApt()} --fix-broken --no-remove install -y && " +
                 "${Userland.ubuntuApt()} install -y --no-install-recommends bash openssh-client ca-certificates curl tmux"
         }
-        runGuest(context, distro, command, if (distro == Distro.Ubuntu) 600 else 240)
+        DiagnosticLog.record(context, "linux", "core_install_started", distro.id)
+        runGuest(context, distro, command, PACKAGE_TIMEOUT_SECONDS)
     }
 
     private fun provisionToolkit(context: Context, distro: Distro) {
@@ -221,7 +222,8 @@ object Bootstrap {
                 "python3 python3-pip git wget vim nano jq rsync zip unzip tar gzip coreutils findutils grep sed less " +
                 "nodejs npm build-essential procps && rm -rf /var/lib/apt/lists/*"
         }
-        runGuest(context, distro, command, 420)
+        DiagnosticLog.record(context, "linux", "toolkit_install_started", distro.id)
+        runGuest(context, distro, command, PACKAGE_TIMEOUT_SECONDS)
     }
 
     private fun ensureIdentitySync(context: Context, distro: Distro) = synchronized(SshKeyStore.identityLock) {
@@ -275,37 +277,31 @@ object Bootstrap {
         // Keep the *tail* of the guest output: apt/dpkg print thousands of
         // progress lines and the failure is always at the end.
         val tail = GuestOutputTail(maxChars = 24_000)
-        val readFailure = AtomicReference<IOException?>()
-        val reader = Thread({
-            try {
-                proc.inputStream.bufferedReader().useLines { lines -> lines.forEach(tail::append) }
-            } catch (error: IOException) {
-                // Destroying a timed-out process can interrupt Android's pipe read.
-                // Report failures to this command's caller, never the app crash handler.
-                readFailure.set(error)
-            }
-        }, "pocketshell-setup-output").apply { isDaemon = true; start() }
-        try {
-            if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                proc.destroyForcibly()
-                reader.join(2_000)
-                DiagnosticLog.record(context, "setup", "command_timeout", "seconds=$timeoutSeconds")
-                throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Last output: ${tail.toString().takeLast(2_500)}")
-            }
-            reader.join()
-            readFailure.get()?.let { error ->
-                DiagnosticLog.record(context, "setup", "output_read_failed", error.javaClass.simpleName)
-                throw IllegalStateException("Linux setup output could not be read.", error)
-            }
-            if (proc.exitValue() != 0) {
-                throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${tail.toString().takeLast(2_500)}")
-            }
-            return tail.toString()
-        } finally {
-            if (proc.isAlive) proc.destroyForcibly()
-            runCatching { proc.inputStream.close() }
-            reader.join(2_000)
+        val readFailure = java.util.concurrent.atomic.AtomicReference<java.io.IOException?>()
+        val reader = Thread {
+            readFailure.set(tail.drain(proc.inputStream))
+        }.apply { isDaemon = true; start() }
+        val output = tail
+        if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            reader.join(5_000)
+            DiagnosticLog.record(context, "linux", "process_timeout", "seconds=$timeoutSeconds")
+            throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
         }
+        reader.join(5_000)
+        if (reader.isAlive) {
+            runCatching { proc.inputStream.close() }
+            DiagnosticLog.record(context, "linux", "process_output_incomplete")
+            throw IllegalStateException("Linux output did not finish after the command exited. Setup was not marked complete.")
+        }
+        readFailure.get()?.let { failure ->
+            DiagnosticLog.record(context, "linux", "process_output_failed", failure.javaClass.simpleName)
+            throw IllegalStateException("Linux output was interrupted (exit " + proc.exitValue() + "). Setup was not marked complete.", failure)
+        }
+        if (proc.exitValue() != 0) {
+            throw IllegalStateException("Linux setup exited ${proc.exitValue()}: ${output.toString().takeLast(2_500)}")
+        }
+        return output.toString()
     }
 
     /** Minimal working network + package config inside the guest. */

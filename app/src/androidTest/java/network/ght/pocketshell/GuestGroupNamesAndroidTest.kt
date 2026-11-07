@@ -32,7 +32,10 @@ class GuestGroupNamesAndroidTest {
     @Test
     fun alpineGroupsAndCompleteToolkitInstallWork() = verifyGuest(Distro.Alpine)
 
-    private fun verifyGuest(distro: Distro) {
+    @Test
+    fun commandTimeoutIsRecoverableAndPreservesNextCommand() = verifyGuest(Distro.Ubuntu, checkTimeout = true)
+
+    private fun verifyGuest(distro: Distro, checkTimeout: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val realContext = instrumentation.targetContext
         val fixture = File(realContext.cacheDir, "group-name-test-" + UUID.randomUUID()).apply { mkdirs() }
@@ -156,23 +159,27 @@ class GuestGroupNamesAndroidTest {
             assertTrue(transcript.get(), transcript.get().contains("GROUP_PTY_DONE"))
             assertFalse(transcript.get(), transcript.get().contains("cannot find name for group ID"))
 
-            // Exercise the production timeout path; an interrupted pipe reader must
-            // return a recoverable failure rather than crashing the entire app.
-            val runGuest = Bootstrap::class.java.getDeclaredMethod(
-                "runGuest", Context::class.java, Distro::class.java, String::class.java, java.lang.Long.TYPE
-            ).apply { isAccessible = true }
-            val timeout = runCatching { runGuest.invoke(Bootstrap, context, distro, "exec sleep 30", 1L) }
-                .exceptionOrNull()
-            val timeoutCause = (timeout as? java.lang.reflect.InvocationTargetException)?.targetException
-            assertTrue("Expected a recoverable timeout: " + timeout, timeoutCause is IllegalStateException)
-            assertTrue(timeoutCause?.message.orEmpty(), timeoutCause?.message.orEmpty().contains("timed out"))
-            val recovered = runGuest.invoke(
-                Bootstrap, context, distro, "printf 'TIMEOUT_RECOVERED\\n'; cat /root/.group-test", 30L
-            ) as String
-            assertTrue(recovered, recovered.contains("TIMEOUT_RECOVERED"))
-            assertTrue(recovered, recovered.contains("owned-storage-probe"))
-            assertTrue(DiagnosticLog.read(context), DiagnosticLog.read(context).contains("command_timeout"))
-            println("GUEST_TIMEOUT_RECOVERY distro=" + distro.id + " passed=true")
+            if (checkTimeout) {
+                // Exercise the production timeout path; an interrupted pipe reader must
+                // return a recoverable failure rather than crashing the entire app.
+                val runGuest = Bootstrap::class.java.getDeclaredMethod(
+                    "runGuest", Context::class.java, Distro::class.java, String::class.java, java.lang.Long.TYPE
+                ).apply { isAccessible = true }
+                val timeout = runCatching { runGuest.invoke(Bootstrap, context, distro, "exec sleep 30", 1L) }
+                    .exceptionOrNull()
+                val timeoutCause = (timeout as? java.lang.reflect.InvocationTargetException)?.targetException
+                println("GUEST_TIMEOUT_CAUSE " + timeoutCause?.stackTraceToString())
+                assertTrue("Expected a recoverable timeout: " + timeoutCause, timeoutCause is IllegalStateException)
+                assertTrue(timeoutCause?.message.orEmpty(), timeoutCause?.message.orEmpty().contains("timed out"))
+                val recovered = runGuest.invoke(
+                    Bootstrap, context, distro, "printf 'TIMEOUT_RECOVERED\\n'; cat /root/.group-test", 30L
+                ) as String
+                assertTrue(recovered, recovered.contains("TIMEOUT_RECOVERED"))
+                assertTrue(recovered, recovered.contains("owned-storage-probe"))
+                assertTrue(DiagnosticLog.read(context), DiagnosticLog.read(context).contains("process_timeout"))
+                println("GUEST_TIMEOUT_RECOVERY distro=" + distro.id + " passed=true")
+
+            }
 
             val events = GuestGroupNames.readEvents(root)
             assertTrue("Repair records missing", events.isNotEmpty())
