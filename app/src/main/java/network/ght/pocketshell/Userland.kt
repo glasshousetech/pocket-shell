@@ -132,6 +132,7 @@ object Userland {
 
     /** Host-side env for the proot process itself. */
     fun prootEnv(context: Context): Array<String> {
+        LinuxDns.refresh(context)
         val tmp = File(context.cacheDir, "proot").apply { mkdirs() }
         val env = mutableListOf(
             "PROOT_LOADER=${loader(context).absolutePath}",
