@@ -287,8 +287,10 @@ object Bootstrap {
         }, "pocketshell-setup-output").apply { isDaemon = true; start() }
         try {
             if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                proc.destroyForcibly()
+                reader.join(2_000)
                 DiagnosticLog.record(context, "setup", "command_timeout", "seconds=$timeoutSeconds")
-                throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Check the connection and retry.")
+                throw IllegalStateException("Linux setup timed out after ${timeoutSeconds}s. Last output: ${tail.toString().takeLast(2_500)}")
             }
             reader.join()
             readFailure.get()?.let { error ->

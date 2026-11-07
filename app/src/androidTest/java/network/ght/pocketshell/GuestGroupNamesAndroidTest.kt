@@ -181,6 +181,12 @@ class GuestGroupNamesAndroidTest {
             assertTrue(exported, exported.contains("android_group_registered"))
             assertFalse(exported, exported.contains("owned-storage-probe"))
             if (distro == Distro.Alpine) {
+                Bootstrap::class.java.getDeclaredMethod("configure", Context::class.java, File::class.java, Distro::class.java)
+                    .apply { isAccessible = true }.invoke(Bootstrap, context, root, distro)
+                val packageProbe = execute(context, Userland.prootExecArgs(context, distro,
+                    "set -x; cat /etc/resolv.conf; apk --version; apk update"), trace = true)
+                assertEquals("Alpine package index: " + packageProbe.output, 0, packageProbe.code)
+
                 val scriptField = Userland::class.java.getDeclaredField("groupStartupScript").apply { isAccessible = true }
                 val originalScript = scriptField.get(Userland) as String
                 try {
@@ -221,7 +227,7 @@ class GuestGroupNamesAndroidTest {
 
     private data class Result(val code: Int, val output: String)
 
-    private fun execute(context: Context, args: Array<String>): Result {
+    private fun execute(context: Context, args: Array<String>, trace: Boolean = false): Result {
         val builder = ProcessBuilder(*args).redirectErrorStream(true)
         builder.environment().clear()
         Userland.prootEnv(context).forEach {
@@ -229,15 +235,25 @@ class GuestGroupNamesAndroidTest {
             builder.environment()[pair[0]] = pair[1]
         }
         val process = builder.start()
-        val output = AtomicReference("")
+        val output = StringBuffer()
+        val readFailure = AtomicReference<java.io.IOException?>()
         val reader = thread(name = "group-regression-output", isDaemon = true) {
-            output.set(process.inputStream.bufferedReader().use { it.readText() })
+            try {
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { line ->
+                        output.append(line).append('\n')
+                        if (trace) println("ALPINE_PACKAGE_TRACE " + line)
+                    }
+                }
+            } catch (error: java.io.IOException) { readFailure.set(error) }
         }
         try {
-            assertTrue("Owned guest command timed out", process.waitFor(90, TimeUnit.SECONDS))
+            val exited = process.waitFor(90, TimeUnit.SECONDS)
+            assertTrue("Owned guest command timed out: " + output, exited)
             reader.join(5_000)
             assertFalse("Guest output reader did not finish", reader.isAlive)
-            return Result(process.exitValue(), output.get())
+            assertNull("Guest output read failed", readFailure.get())
+            return Result(process.exitValue(), output.toString())
         } finally {
             if (process.isAlive) process.destroyForcibly()
             reader.join(5_000)
