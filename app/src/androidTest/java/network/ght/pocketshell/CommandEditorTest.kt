@@ -27,10 +27,36 @@ class CommandEditorTest {
         }
     }
 
+    @Test fun switchingKeyboardModesPreservesExactDraftSelectionAndExplicitCase() {
+        instrumentation.runOnMainSync {
+            val editor = CommandEditText(instrumentation.targetContext)
+            val draft = "printf 'MiXeD café 🚀'"
+            editor.setText(draft)
+            editor.setSelection(8, 13)
+            for (voice in listOf(false, true, false)) {
+                editor.setVoiceMode(voice)
+                assertEquals(draft, editor.text.toString())
+                assertEquals(8, editor.selectionStart)
+                assertEquals(13, editor.selectionEnd)
+                assertNull(editor.transformationMethod)
+                val info = EditorInfo()
+                val connection = editor.onCreateInputConnection(info)!!
+                assertEquals(if (voice) InputType.TYPE_TEXT_VARIATION_NORMAL else InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                    info.inputType and InputType.TYPE_MASK_VARIATION)
+                connection.closeConnection()
+            }
+            val connection = editor.onCreateInputConnection(EditorInfo())!!
+            assertTrue(connection.commitText("UPPER", 1))
+            assertEquals("printf 'UPPER café 🚀'", editor.text.toString())
+            connection.closeConnection()
+        }
+    }
+
     @Test fun compositionCommitManualCaseUnicodeAndCursorEditingStayLiteral() {
         val expected = "echo 'MiXeD café 🚀'"
         instrumentation.runOnMainSync {
             val editor = CommandEditText(instrumentation.targetContext)
+            editor.setVoiceMode(true)
             editor.setText("")
             val connection = editor.onCreateInputConnection(EditorInfo())!!
             assertTrue(connection.setComposingText("echo 'MiXeD ca", 1))

@@ -154,6 +154,10 @@ class TerminalWorkspaceUiTest {
                 assertNotNull(editor)
                 editor.text = "printf UX_PROOF"
                 assertTrue(device.wait(Until.hasObject(By.text("printf UX_PROOF")), 4000))
+                device.findObject(By.text("Voice typing")).click()
+                assertTrue("Mode change preserves draft", device.wait(Until.hasObject(By.text("printf UX_PROOF")), 4000))
+                device.findObject(By.text("Code typing")).click()
+                assertTrue("Returning to code preserves draft", device.wait(Until.hasObject(By.text("printf UX_PROOF")), 4000))
                 device.waitForIdle()
                 device.takeScreenshot(File(dir, "text-voice-portrait.png"))
                 device.findObject(By.text("Insert")).click()

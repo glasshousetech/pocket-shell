@@ -3,18 +3,48 @@ package network.ght.pocketshell
 import android.content.Context
 import android.text.InputType
 import android.view.Gravity
+import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 
-/** Literal command text, with normal Unicode composition and keyboard dictation. */
+/** Command typing and composed/voice input have different keyboard contracts. */
 class CommandEditText(context: Context) : EditText(context) {
+    var voiceMode: Boolean = false
+        private set
+
     init {
-        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        inputType = inputFlags(false)
+        transformationMethod = null
         imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_ENTER_ACTION
         gravity = Gravity.TOP or Gravity.START
-        setTextIsSelectable(false)
+    }
+
+    private fun inputFlags(voice: Boolean): Int = InputType.TYPE_CLASS_TEXT or
+        InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
+        if (voice) InputType.TYPE_TEXT_VARIATION_NORMAL else InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+
+    fun setVoiceMode(enabled: Boolean) {
+        if (voiceMode == enabled) return
+        // Keep the reviewed draft and cursor while ending the previous IME composition.
+        BaseInputConnection.removeComposingSpans(text)
+        voiceMode = enabled
+        setRawInputType(inputFlags(enabled))
+        transformationMethod = null
+        if (isAttachedToWindow && hasFocus()) {
+            context.getSystemService(InputMethodManager::class.java).restartInput(this)
+        }
+        DiagnosticLog.record(context, "input", if (enabled) "editor_voice_mode" else "editor_code_mode")
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus && hasFocus()) {
+            context.getSystemService(InputMethodManager::class.java)
+                .showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
@@ -22,8 +52,6 @@ class CommandEditText(context: Context) : EditText(context) {
         outAttrs.initialCapsMode = 0
         DiagnosticLog.record(context, "input", "literal_editor_connection")
         return object : InputConnectionWrapper(original, false) {
-            // IMEs can ask for sentence caps even when inputType requests none.
-            // Answer for this command editor; never rewrite committed characters.
             override fun getCursorCapsMode(reqModes: Int): Int = 0
         }
     }
