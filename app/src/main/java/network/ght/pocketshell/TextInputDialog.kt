@@ -35,6 +35,11 @@ fun TextInputDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        val dialogWindow = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        SideEffect {
+            // Compose applies IME insets below. Native EditText must not additionally pan this window.
+            dialogWindow?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        }
         BoxWithConstraints(
             Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(8.dp),
             contentAlignment = Alignment.Center,
@@ -44,13 +49,20 @@ fun TextInputDialog(
                 Column(Modifier.heightIn(max = maxHeight).padding(horizontal = 12.dp, vertical = 4.dp)) {
                     // Keep actions above the editor and keyboard, including landscape.
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Text / voice", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        if (compact) {
+                            FilterChip(selected = !voiceMode, onClick = { voiceMode = false }, label = { Text("Code typing") })
+                            Spacer(Modifier.width(8.dp))
+                            FilterChip(selected = voiceMode, onClick = { voiceMode = true }, label = { Text("Voice typing") })
+                            Spacer(Modifier.weight(1f))
+                        } else {
+                            Text("Text / voice", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        }
                         TextButton(onClick = onDismiss) { Text("Close") }
                         TextButton(onClick = onInsert, enabled = TerminalInteraction.reviewedText(value).isNotBlank()) { Text("Insert") }
                     }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                         maxLines = if (compact) 2 else 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!compact) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = !voiceMode, onClick = { voiceMode = false }, label = { Text("Code typing") })
                         FilterChip(selected = voiceMode, onClick = { voiceMode = true }, label = { Text("Voice typing") })
                     }
@@ -62,7 +74,7 @@ fun TextInputDialog(
                     }
                     Column(Modifier.fillMaxWidth().weight(1f, fill = false)
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp)) {
                         Text("Text to insert", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         AndroidView(

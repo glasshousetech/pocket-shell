@@ -332,10 +332,9 @@ fun SettingsDialog(
                     colors = SwitchDefaults.colors(checkedTrackColor = RailAccent, checkedThumbColor = RailPromptText),
                 )
                 Text(
-                    "Full keyboard features. Keeps your keyboard's own top row, so voice typing, " +
-                        "the clipboard, emoji and its settings stay reachable at the prompt. Autocorrect " +
-                        "and predictions stay off either way. Turn this off only if your keyboard starts " +
-                        "inserting or swallowing characters in the terminal.",
+                    "Full keyboard features enable voice, clipboard and composed input at the prompt. " +
+                        "Some keyboards may capitalize or correct commands. Turn this off for literal " +
+                        "terminal keys. Text / voice remains available for reviewed dictation.",
                     color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
                 )
             }
