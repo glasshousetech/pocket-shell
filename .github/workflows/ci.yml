@@ -14,6 +14,10 @@ on:
         description: Record and narrate the verified native command workflow
         type: boolean
         default: false
+      render_demo_run:
+        description: Existing successful native recording run to narrate without rerunning the app
+        type: string
+        default: ""
 
 permissions:
   contents: read
