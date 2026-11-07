@@ -30,6 +30,9 @@ class FilesWorkflowTest {
             if (condition()) return
             SystemClock.sleep(40)
         }
+        val captures = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+        device.takeScreenshot(File(captures, "files-failure.png"))
+        device.dumpWindowHierarchy(File(captures, "files-failure.xml"))
         error(message)
     }
     private fun text(label: String): UiObject2 {
@@ -48,6 +51,10 @@ class FilesWorkflowTest {
         assumeTrue("Isolated emulator only", android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         println("FILES_PHASE starting")
         val context = instrumentation.targetContext
+        instrumentation.uiAutomation.executeShellCommand("pm grant network.ght.pocketshell android.permission.POST_NOTIFICATIONS").use { descriptor ->
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+        }
+        waitFor("Notification permission fixture was not ready") { context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED }
         val service = (serviceRule.bindService(Intent(context, TermService::class.java)) as TermService.LocalBinder).service
         println("FILES_PHASE service_bound")
         val id = UUID.randomUUID().toString()

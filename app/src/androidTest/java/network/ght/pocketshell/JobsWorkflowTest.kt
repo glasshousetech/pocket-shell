@@ -31,6 +31,9 @@ class JobsWorkflowTest {
     private fun waitFor(message: String, condition: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 30000
         while (SystemClock.uptimeMillis() < deadline) { if (condition()) return; SystemClock.sleep(40) }
+        val captures = File(instrumentation.targetContext.filesDir, "screenshots").apply { mkdirs() }
+        device.takeScreenshot(File(captures, "jobs-failure.png"))
+        device.dumpWindowHierarchy(File(captures, "jobs-failure.xml"))
         error(message)
     }
     private fun fresh() { if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache() }
