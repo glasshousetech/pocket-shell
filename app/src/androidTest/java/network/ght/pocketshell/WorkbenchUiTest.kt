@@ -55,6 +55,12 @@ class WorkbenchUiTest {
         return device.findObjects(By.clazz(EditText::class.java))
     }
 
+    private fun setField(label: String, index: Int, value: String) {
+        text(label) // Wait for the destination page, not the departing page's text field.
+        device.waitForIdle()
+        fields()[index].text = value
+    }
+
     private fun beat(id: String) {
         val directory = File(context.filesDir, "screenshots").apply { mkdirs() }
         device.takeScreenshot(File(directory, "workbench-" + id + ".png"))
@@ -85,6 +91,7 @@ class WorkbenchUiTest {
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                try {
                 waitFor("PTY initialized") { holder.session.emulator != null }
                 device.waitForIdle()
                 scenario.onActivity { activity ->
@@ -96,8 +103,8 @@ class WorkbenchUiTest {
                 text("Saved commands").click()
                 text("Add command").click()
                 text("Save command")
-                fields()[0].text = "Print a message"
-                fields()[1].text = "printf '%s\\n' {{message}}"
+                setField("Command name", 0, "Print a message")
+                setField("Command template", 1, "printf '%s\\n' {{message}}")
                 waitFor("template draft entered") { service.workbench.editing?.template == "printf '%s\\n' {{message}}" }
                 scenario.recreate()
                 text("Save command")
@@ -109,7 +116,7 @@ class WorkbenchUiTest {
 
                 desc("Use Print a message").click()
                 val value = "DEMO_MATCH it's literal " + "$" + "(printf injected)"
-                fields().single().text = value
+                setField("Parameter: message", 0, value)
                 waitFor("parameter field committed") { service.workbench.parameters["message"] == value }
                 val exact = CommandTemplate.render("printf '%s\\n' {{message}}", mapOf("message" to value))
                 text(exact)
@@ -132,14 +139,15 @@ class WorkbenchUiTest {
 
                 device.pressKeyCode(KeyEvent.KEYCODE_P, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
                 text("Search output").click()
-                fields().single().text = "DEMO_MATCH"
-                text("Next match")
+                setField("Find in output", 0, "DEMO_MATCH")
+                text("Match 1 of 2")
                 waitFor("search query retained") { service.workbench.outputQuery == "DEMO_MATCH" }
                 text("Next match").click()
+                text("Match 2 of 2")
                 text("Copy matching line").click()
                 assertEquals(value, main { Clip.paste() })
                 beat("search")
-                fields().single().text = "NO_MATCH_6c16cc41"
+                setField("Find in output", 0, "NO_MATCH_6c16cc41")
                 text("No matches in this snapshot.")
                 beat("empty")
                 text("Close tools").click()
@@ -149,7 +157,7 @@ class WorkbenchUiTest {
                 text("Saved commands").click()
                 text("Refresh commands").click()
                 desc("Edit Print a message").click()
-                fields()[0].text = "Message again"
+                setField("Command name", 0, "Message again")
                 text("Save command").click()
                 desc("Use Message again")
                 assertEquals("Message again", CommandStore.load(context).getOrThrow().single().name)
@@ -162,7 +170,7 @@ class WorkbenchUiTest {
                 // Palette selection routes the visible service selection without executing anything.
                 val sibling = main { service.newSession(SessionMode.SYSTEM).also { service.renameSession(it, "Sibling terminal") } }
                 text("Actions").click()
-                fields().single().text = "Sibling"
+                setField("Find an action, session, host or command", 0, "Sibling")
                 text("Switch to Sibling terminal").click()
                 assertEquals(sibling.id, main { service.selectedSessionId.value })
                 val shots = File(context.filesDir, "screenshots").apply { mkdirs() }
@@ -170,12 +178,14 @@ class WorkbenchUiTest {
                 val logs = DiagnosticLog.read(context)
                 assertTrue(logs.contains("\"component\":\"commands\""))
                 assertFalse("Command values must not enter diagnostic logs", logs.contains(value))
+                } catch (failure: Throwable) {
+                    // Capture before ActivityScenario closes the app on exception.
+                    val shots = File(context.filesDir, "screenshots").apply { mkdirs() }
+                    device.takeScreenshot(File(shots, "workbench-failure.png"))
+                    device.dumpWindowHierarchy(File(shots, "workbench-failure.xml"))
+                    throw failure
+                }
             }
-        } catch (failure: Throwable) {
-            val shots = File(context.filesDir, "screenshots").apply { mkdirs() }
-            device.takeScreenshot(File(shots, "workbench-failure.png"))
-            device.dumpWindowHierarchy(File(shots, "workbench-failure.xml"))
-            throw failure
         } finally {
             main { service.workbench.close(); service.sessions.toList().forEach(service::closeSession) }
             if (previous == null) library.delete() else library.writeBytes(previous)
