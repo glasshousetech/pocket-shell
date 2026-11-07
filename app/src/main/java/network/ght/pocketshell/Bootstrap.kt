@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import android.system.Os
+import android.system.OsConstants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
@@ -116,8 +117,11 @@ object Bootstrap {
         }
     }
 
-    private fun rootfsDirExists(context: Context, distro: Distro): Boolean =
-        File(Userland.rootfsDir(context, distro), "bin/sh").exists()
+    private fun rootfsDirExists(context: Context, distro: Distro): Boolean = runCatching {
+        // Guest absolute symlinks resolve inside proot, not Android's filesystem.
+        val mode = Os.lstat(File(Userland.rootfsDir(context, distro), "bin/sh").absolutePath).st_mode
+        OsConstants.S_ISREG(mode) || OsConstants.S_ISLNK(mode)
+    }.getOrDefault(false)
 
     /** Streams [url] to [dest] while computing its SHA-256; returns the hex digest. */
     private fun download(url: String, dest: File, onProgress: (Int) -> Unit): String {

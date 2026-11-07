@@ -174,6 +174,7 @@ class GuestGroupNamesAndroidTest {
                     assertTrue("Alpine toolchain: " + installed.exceptionOrNull()?.message, installed.isSuccess)
                     val health = runBlocking { Bootstrap.healthCheck(context) }
                     assertTrue("Installed toolchain health: " + health.exceptionOrNull()?.message, health.isSuccess)
+                    assertEquals("Repair preserves home data", "owned-storage-probe", File(root, "root/.group-test").readText())
                     println("ALPINE_INSTALL_HEALTH " + health.getOrThrow())
                 } finally {
                     scriptField.set(Userland, originalScript)

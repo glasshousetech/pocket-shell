@@ -14,12 +14,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Not a correctness gate (see [TerminalSmokeTest] for that) — walks the app
- * through a handful of real screens and saves a screenshot of each, so
- * someone can see what Pocket Shell actually looks like without needing a
- * local emulator on a resource-constrained host. Manually triggered only
- * (see the `screenshots` CI job): UI-coordinate/text automation like this is
- * more brittle than the smoke test and shouldn't gate releases.
+ * Verifies fresh Alpine setup reaches a terminal, then captures real app screens.
+ * The screenshot gallery complements the behavior assertions in the native tests.
  */
 @RunWith(AndroidJUnit4::class)
 class ScreenshotTest {
@@ -54,13 +50,19 @@ class ScreenshotTest {
             if (device.wait(Until.findObject(By.text("Set up Pocket Shell")), 15_000) != null) {
                 capture("first_run_setup")
                 device.findObject(By.text("Alpine Linux"))?.click()
-                device.wait(Until.findObject(By.clazz(TERMINAL)), 240_000)
+                val setupTimeout = InstrumentationRegistry.getArguments().getString("setupTimeoutMs")?.toLongOrNull()
+                    ?: 20 * 60_000L
+                require(setupTimeout > 0)
+                val deadline = android.os.SystemClock.elapsedRealtime() + setupTimeout
+                while (android.os.SystemClock.elapsedRealtime() < deadline &&
+                    !device.hasObject(By.clazz(TERMINAL)) &&
+                    !device.hasObject(By.text("Couldn't set up Linux"))) {
+                    // Wake on progress/error changes; allow complete package installation.
+                    device.waitForWindowUpdate(instrumentation.targetContext.packageName, 1_000)
+                }
             }
             if (device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000) == null) {
-                // proot cannot fork under the emulator kernel ("/bin/sh: can't fork:
-                // Function not implemented"), and first run will not release the UI
-                // without a working Linux install. Capture the failure and stop rather
-                // than filling the artifact with identical pictures of the gate.
+                // A failed or stalled install must fail the run and retain diagnostics.
                 capture("setup_failed")
                 device.dumpWindowHierarchy(File(outDir, "setup-failure.xml"))
                 File(outDir, "setup-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
