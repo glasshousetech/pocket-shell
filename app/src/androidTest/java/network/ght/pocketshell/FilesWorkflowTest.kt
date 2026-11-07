@@ -47,7 +47,17 @@ class FilesWorkflowTest {
             if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
             device.hasObject(By.text(label)) || device.hasObject(By.scrollable(true))
         }
-        if (!device.hasObject(By.text(label))) UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text(label))
+        // Search both directions in small viewport steps. A large lazy-column
+        // header may contain the status above the currently visible receipts.
+        for (direction in listOf(Direction.UP, Direction.DOWN)) {
+            while (!device.hasObject(By.text(label))) {
+                val list = device.findObject(By.scrollable(true)) ?: break
+                val more = list.scroll(direction, 0.45f)
+                if (android.os.Build.VERSION.SDK_INT >= 34) instrumentation.uiAutomation.clearCache()
+                if (!more) break
+            }
+            if (device.hasObject(By.text(label))) break
+        }
         return text(label)
     }
     private fun ready(state: FilesWorkbench) {

@@ -75,7 +75,7 @@ for cue in cues:
 audio_filters.append("".join(f"[a{i}]" for i in range(len(chapters))) +
                      f"amix=inputs={len(chapters)}:normalize=0,apad=whole_dur={duration},loudnorm=I=-16:TP=-1.5:LRA=11[voice]")
 (work / "title.txt").write_text("PocketShell — " + title, encoding="utf-8")
-filters = (f"trim=start={start}:end={end},setpts=PTS-STARTPTS,fps=30,pad=iw:ih+304:0:80:color=0x0c1424,"
+filters = (f"trim=start={start}:end={end},setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop_duration={duration},pad=iw:ih+304:0:80:color=0x0c1424,"
            "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=title.txt:fontcolor=white:fontsize=28:x=24:y=18,"
            f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Android emulator · candidate {revision[:8]}':fontcolor=0xa9bad1:fontsize=18:x=24:y=53,"
            "ass=captions.ass")
@@ -89,6 +89,9 @@ if not any(stream["codec_type"] == "audio" for stream in final["streams"]):
     raise SystemExit("Narration audio track missing.")
 if abs(float(final["format"]["duration"]) - duration) > 0.3:
     raise SystemExit("Final media duration differs from the reviewed timeline.")
+if abs(float(next(s for s in final["streams"] if s["codec_type"] == "video")["duration"]) - duration) > 0.3:
+    raise SystemExit("Video frames do not cover the complete narrated timeline.")
+
 frames = work / "review-frames"
 frames.mkdir(exist_ok=True)
 for chapter in chapters:
@@ -96,6 +99,8 @@ for chapter in chapters:
                     "-frames:v", "1", str(frames / (chapter["id"] + ".png"))], check=True)
 subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(chapters[min(3, len(chapters) - 1)]["time"] + 1), "-i", str(work / "PocketShell-demo.mp4"),
                 "-frames:v", "1", str(work / "poster.png")], check=True)
+if not (work / "poster.png").is_file() or not all((frames / (c["id"] + ".png")).is_file() for c in chapters):
+    raise SystemExit("A chapter or poster frame could not be extracted.")
 transcript = ["PocketShell: " + title, f"Candidate {revision}; isolated Android emulator; " + fixture + ".",
               "Narrator: " + story["narrator"], ""]
 for chapter in chapters:
