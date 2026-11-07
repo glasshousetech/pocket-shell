@@ -19,6 +19,7 @@ class CommandEditorTest {
                 val info = EditorInfo()
                 val connection = editor.onCreateInputConnection(info)!!
                 assertEquals(0, info.inputType and caps)
+                assertEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE)
                 assertEquals(0, info.initialCapsMode)
                 assertNotEquals(0, info.imeOptions and EditorInfo.IME_FLAG_NO_FULLSCREEN)
                 assertEquals(0, connection.getCursorCapsMode(caps))
@@ -42,6 +43,7 @@ class CommandEditorTest {
                 assertNull(editor.transformationMethod)
                 val info = EditorInfo()
                 val connection = editor.onCreateInputConnection(info)!!
+                assertEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE)
                 assertEquals(if (voice) InputType.TYPE_TEXT_VARIATION_NORMAL else InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
                     info.inputType and InputType.TYPE_MASK_VARIATION)
                 connection.closeConnection()

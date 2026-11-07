@@ -49,6 +49,9 @@ class CommandEditText(context: Context) : EditText(context) {
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val original = super.onCreateInputConnection(outAttrs) ?: return null
+        // The editor still wraps and retains pasted line breaks. Its IME contract is
+        // one command: SwiftKey 9.13 capitalizes empty multiline fields despite caps=0.
+        outAttrs.inputType = outAttrs.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE.inv()
         outAttrs.initialCapsMode = 0
         DiagnosticLog.record(context, "input", "literal_editor_connection")
         return object : InputConnectionWrapper(original, false) {
