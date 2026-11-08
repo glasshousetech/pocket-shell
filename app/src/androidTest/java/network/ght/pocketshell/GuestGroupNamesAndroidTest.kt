@@ -196,11 +196,17 @@ class GuestGroupNamesAndroidTest {
             if (checkToolkit) {
                 Bootstrap::class.java.getDeclaredMethod("configure", Context::class.java, File::class.java, Distro::class.java)
                     .apply { isAccessible = true }.invoke(Bootstrap, context, root, distro)
-                val packageProbe = execute(context, Userland.prootExecArgs(context, distro,
-                    "set -x; cat /etc/resolv.conf; apk --version; " +
-                    "busybox timeout 15 busybox nslookup dl-cdn.alpinelinux.org; echo DNS_EXIT=$?; " +
-                    "busybox timeout 20 busybox wget -S -O /tmp/pocketshell-network-index http://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz; echo HTTP_EXIT=$?; " +
-                    "apk update"), trace = true)
+                // Compare TLS clients and a test-only HTTP index fetch. Production
+                // repositories and certificate verification are unchanged.
+                File(root, "tmp/pocketshell-probe-repositories").writeText(
+                    "http://dl-cdn.alpinelinux.org/alpine/v3.20/main\n")
+                val probeArgs = Userland.prootExecArgs(context, distro,
+                    "set -x; apk --version; " +
+                    "busybox timeout 20 busybox wget -S -O /tmp/pocketshell-https-index https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz; echo WGET_HTTPS_EXIT=$?; " +
+                    "busybox timeout 20 apk --repositories-file /tmp/pocketshell-probe-repositories update; echo APK_HTTP_EXIT=$?; " +
+                    "busybox timeout 20 apk update; rc=$?; echo APK_HTTPS_EXIT=${'$'}rc; exit ${'$'}rc")
+                val verboseProbeArgs = arrayOf(probeArgs.first(), "-v", "1") + probeArgs.drop(1)
+                val packageProbe = execute(context, verboseProbeArgs, trace = true)
                 assertEquals("Alpine package index: " + packageProbe.output, 0, packageProbe.code)
 
                 val scriptField = Userland::class.java.getDeclaredField("groupStartupScript").apply { isAccessible = true }
