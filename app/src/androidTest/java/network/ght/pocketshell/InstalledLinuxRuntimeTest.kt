@@ -47,7 +47,7 @@ class InstalledLinuxRuntimeTest {
             }
             assertTrue(probe.setExecutable(true, true))
             val output = runLinux("/root/.pocketshell-runtime-probe", probe)
-            assertTrue(output, output.contains("POCKETSHELL_SYSCALLS_OK 20"))
+            assertTrue(output, output.contains("POCKETSHELL_SYSCALLS_OK 42"))
         } finally { probe.delete() }
     }
 
