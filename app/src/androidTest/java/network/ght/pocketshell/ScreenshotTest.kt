@@ -2,13 +2,16 @@ package network.ght.pocketshell
 
 import android.graphics.Bitmap
 import android.util.Log
+import android.Manifest
+import android.os.Build
+import java.util.regex.Pattern
+import org.junit.Assert.assertTrue
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -25,14 +28,13 @@ class ScreenshotTest {
     fun captureAppScreens() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
-        // This fresh-install fixture must also work outside the screenshot job,
-        // which used to grant this permission in its workflow wrapper.
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            val context = instrumentation.targetContext
-            device.executeShellCommand("pm grant " + context.packageName + " android.permission.POST_NOTIFICATIONS")
-            assertTrue("Notification permission must be ready before opening the fixture",
-                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        val packageName = instrumentation.targetContext.packageName
+        if (Build.VERSION.SDK_INT >= 33) {
+            instrumentation.uiAutomation.grantRuntimePermission(packageName, Manifest.permission.POST_NOTIFICATIONS)
         }
+        // TerminalView exposes android.view.View to accessibility. Match its actual
+        // rendered ready transcript instead of assuming the Java class is exported.
+        val terminalSelector = By.pkg(packageName).descContains("Pocket Shell is ready.")
         // filesDir (app-private internal storage) is always non-null, unlike
         // getExternalFilesDir(null) which returned null on this AVD image and
         // silently wrote screenshots nowhere useful. Pulled off-device via
@@ -43,10 +45,8 @@ class ScreenshotTest {
         var shot = 0
         fun capture(name: String) {
             shot++
-            val bitmap: Bitmap? = instrumentation.uiAutomation.takeScreenshot()
-            if (bitmap == null) {
-                Log.w(TAG, "takeScreenshot() returned null for $name")
-                return
+            val bitmap: Bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot()) {
+                "Screenshot capture returned no frame for $name"
             }
             val file = File(outDir, "%02d_%s.png".format(shot, name))
             FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -58,19 +58,19 @@ class ScreenshotTest {
             // dismissed, so take Alpine — a ~3 MB rootfs — to get past it.
             if (device.wait(Until.findObject(By.text("Set up Pocket Shell")), 15_000) != null) {
                 capture("first_run_setup")
-                requireNotNull(device.findObject(By.text("Alpine Linux"))) { "Alpine setup choice is missing" }.click()
+                device.findObject(By.text("Alpine Linux"))?.click()
                 val setupTimeout = InstrumentationRegistry.getArguments().getString("setupTimeoutMs")?.toLongOrNull()
                     ?: 20 * 60_000L
                 require(setupTimeout > 0)
                 val deadline = android.os.SystemClock.elapsedRealtime() + setupTimeout
                 while (android.os.SystemClock.elapsedRealtime() < deadline &&
-                    !device.hasObject(By.descContains(TERMINAL_READY_DESCRIPTION)) &&
+                    !device.hasObject(terminalSelector) &&
                     !device.hasObject(By.text("Couldn't set up Linux"))) {
                     // Wait for the terminal while also checking for a recoverable setup error.
-                    device.wait(Until.hasObject(By.descContains(TERMINAL_READY_DESCRIPTION)), 1_000)
+                    device.wait(Until.hasObject(terminalSelector), 1_000)
                 }
             }
-            if (device.wait(Until.findObject(By.descContains(TERMINAL_READY_DESCRIPTION)), 15_000) == null) {
+            if (device.wait(Until.findObject(terminalSelector), 15_000) == null) {
                 // A failed or stalled install must fail the run and retain diagnostics.
                 capture("setup_failed")
                 device.dumpWindowHierarchy(File(outDir, "setup-failure.xml"))
@@ -79,17 +79,23 @@ class ScreenshotTest {
                     .mapNotNull { it.text }.filter { it.isNotBlank() }
                 throw AssertionError("Fresh Alpine setup did not reach a terminal: " + messages.joinToString(" | "))
             }
-            device.waitForIdle()
+            device.waitForIdle() // present the actual ready frame
             capture("launch_shell")
 
             // Focus the terminal (window focus alone doesn't route text input;
             // it needs an explicit tap), then run a real command and capture it.
-            device.findObject(By.descContains(TERMINAL_READY_DESCRIPTION))?.click()
+            device.findObject(terminalSelector)?.click()
             device.waitForIdle()
             device.executeShellCommand("input text echo%sPOCKETSHELL_SCREENSHOT_DEMO")
             device.pressEnter()
-            assertTrue("A real shell command must produce its output line",
-                device.wait(Until.hasObject(By.descContains("\nPOCKETSHELL_SCREENSHOT_DEMO\n")), 10_000))
+            val outputSelector = By.pkg(packageName).desc(Pattern.compile(
+                "(?s).*\nPOCKETSHELL_SCREENSHOT_DEMO\r?\n.*",
+            ))
+            assertTrue("A real command must produce its own output line, not merely echo input",
+                device.wait(Until.hasObject(outputSelector), 15_000))
+            File(outDir, "first-use-transcript.txt").writeText(
+                device.findObject(outputSelector).contentDescription.orEmpty())
+            File(outDir, "first-use-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
             capture("command_output")
 
             device.findObject(By.text("⚙"))?.click()
@@ -133,8 +139,5 @@ class ScreenshotTest {
 
     private companion object {
         const val TAG = "PocketShellScreenshotTest"
-        // TerminalView exposes android.view.View to accessibility. Its transcript
-        // proves setup reached the actual shell and identifies the focus target.
-        const val TERMINAL_READY_DESCRIPTION = "Pocket Shell is ready."
     }
 }
