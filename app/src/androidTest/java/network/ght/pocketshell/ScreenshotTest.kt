@@ -98,40 +98,44 @@ class ScreenshotTest {
             File(outDir, "first-use-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
             capture("command_output")
 
-            device.findObject(By.text("⚙"))?.click()
-            device.wait(Until.findObject(By.text("AI Copilot")), 5_000)
+            fun click(label: String) {
+                requireNotNull(device.wait(Until.findObject(By.text(label)), 5_000)) {
+                    "Missing capture control: " + label
+                }.click()
+                device.waitForIdle()
+            }
+            fun visible(label: String) {
+                assertTrue("Expected capture screen: " + label,
+                    device.wait(Until.hasObject(By.text(label)), 5_000))
+            }
+            requireNotNull(device.wait(Until.findObject(By.desc("Settings")), 5_000)).click()
+            visible("Pocket Shell Settings")
             capture("settings")
 
-            // The Keyboard section sits below the AI block in the scrolling dialog.
-            repeat(6) {
-                if (device.findObject(By.text("Keyboard")) == null) {
-                    device.swipe(
-                        device.displayWidth / 2, (device.displayHeight * 0.72).toInt(),
-                        device.displayWidth / 2, (device.displayHeight * 0.38).toInt(), 12,
-                    )
-                    device.waitForIdle()
-                }
-            }
+            click("Keyboard")
+            visible("Customize terminal keys")
+            assertTrue("Keyboard preferences must actually be visible",
+                device.wait(Until.hasObject(By.textContains("Full keyboard features enable")), 5_000))
             capture("settings_keyboard")
             device.pressBack()
-            device.waitForIdle()
+            assertTrue(device.wait(Until.gone(By.text("Pocket Shell Settings")), 5_000))
 
-            device.findObject(By.text("AI"))?.click()
-            device.waitForIdle()
+            click("AI")
+            visible("Close AI")
             capture("copilot_panel")
-            device.findObject(By.text("AI"))?.click() // close it again
-            device.waitForIdle()
+            click("Close AI")
+            assertTrue(device.wait(Until.gone(By.text("Close AI")), 5_000))
 
-            device.findObject(By.text("Theme"))?.click()
-            device.waitForIdle()
+            click("Theme")
+            visible("Themes")
             capture("theme_picker")
-            device.pressBack()
-            device.waitForIdle()
+            click("Close")
+            assertTrue(device.wait(Until.gone(By.text("Themes")), 5_000))
 
-            device.findObject(By.text("Connect"))?.click()
-            device.waitForIdle()
+            click("Connect")
+            visible("Connections")
             capture("connections")
-            device.pressBack()
+            click("Close connections")
         }
 
         Log.i(TAG, "final dir listing: ${outDir.listFiles()?.joinToString { it.name }}")
