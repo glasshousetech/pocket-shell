@@ -25,6 +25,14 @@ class ScreenshotTest {
     fun captureAppScreens() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
+        // This fresh-install fixture must also work outside the screenshot job,
+        // which used to grant this permission in its workflow wrapper.
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val context = instrumentation.targetContext
+            device.executeShellCommand("pm grant " + context.packageName + " android.permission.POST_NOTIFICATIONS")
+            assertTrue("Notification permission must be ready before opening the fixture",
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        }
         // filesDir (app-private internal storage) is always non-null, unlike
         // getExternalFilesDir(null) which returned null on this AVD image and
         // silently wrote screenshots nowhere useful. Pulled off-device via
