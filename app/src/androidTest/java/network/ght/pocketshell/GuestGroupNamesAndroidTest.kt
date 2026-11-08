@@ -30,7 +30,7 @@ class GuestGroupNamesAndroidTest {
     fun inheritedGroupsResolveBeforeCommandsAndPtyStartup() = verifyGuest(Distro.Ubuntu)
 
     @Test
-    fun alpineGroupsAndCompleteToolkitInstallWork() = verifyGuest(Distro.Alpine, checkPty = false, checkToolkit = true)
+    fun alpineGroupsAndCompleteToolkitInstallWork() = verifyGuest(Distro.Alpine, checkPty = false, checkToolkit = true, checkSyscalls = false)
 
     @Test
     fun commandTimeoutIsRecoverableAndPreservesNextCommand() = verifyGuest(Distro.Ubuntu, checkTimeout = true, checkPty = false)
@@ -38,7 +38,7 @@ class GuestGroupNamesAndroidTest {
     @Test
     fun alpinePtyRetainsFinalOutput() = verifyGuest(Distro.Alpine)
 
-    private fun verifyGuest(distro: Distro, checkTimeout: Boolean = false, checkPty: Boolean = true, checkToolkit: Boolean = false) {
+    private fun verifyGuest(distro: Distro, checkTimeout: Boolean = false, checkPty: Boolean = true, checkToolkit: Boolean = false, checkSyscalls: Boolean = true) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val realContext = instrumentation.targetContext
         val fixture = File(realContext.cacheDir, "group-name-test-" + UUID.randomUUID()).apply { mkdirs() }
@@ -88,7 +88,8 @@ class GuestGroupNamesAndroidTest {
             println("GROUP_NAME_BASELINE code=" + baseline.code + " output=" + baseline.output.replace("\n", "\\n"))
             val numericGroups = baseline.output.lineSequence().first { it.startsWith("IDS=") }
 
-            if (abi == "x86_64") {
+            // Keep full installation independent from the dedicated raw-syscall regression.
+            if (abi == "x86_64" && checkSyscalls) {
                 val probe = File(root, "tmp/pocketshell-syscalls-probe")
                 instrumentation.context.assets.open("runtime-syscalls-x86_64").use { input ->
                     probe.outputStream().use { input.copyTo(it) }
