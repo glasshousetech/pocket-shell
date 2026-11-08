@@ -53,14 +53,18 @@ static void test_select(void) {
  struct sigaction action={0},previous={0};
  action.sa_handler=select_signal_handler;sigemptyset(&action.sa_mask);
  require(sigaction(SIGUSR1,&action,&previous)==0,"select install owned signal handler");
+ sigset_t signal_set,original_mask;sigemptyset(&signal_set);sigaddset(&signal_set,SIGUSR1);
+ require(sigprocmask(SIG_UNBLOCK,&signal_set,&original_mask)==0,"select unblock owned test signal");
+ printf("SELECT_SIGNAL_MASK inheritedBlocked=%d\n",sigismember(&original_mask,SIGUSR1));
  pid_t parent=getpid(),child=fork();require(child>=0,"select interruption child");
- if(child==0){usleep(50000);kill(parent,SIGUSR1);_exit(0);}
+ if(child==0){usleep(50000);if(kill(parent,SIGUSR1)!=0){fprintf(stderr,"SELECT_SIGNAL_SEND errno=%d\n",errno);_exit(125);}_exit(0);}
  tv=(struct timeval){2,0};errno=0;
  long result=syscall(SYS_select,0,NULL,NULL,NULL,&tv);int saved_errno=errno;
  int status;require(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==0,"select signal fixture finishes");
  printf("SELECT_INTERRUPTED result=%ld errno=%d signal=%d timeout=%ld.%06ld\n",result,saved_errno,(int)select_signal,(long)tv.tv_sec,(long)tv.tv_usec);
  require(result==-1 && saved_errno==EINTR && select_signal==SIGUSR1 && (tv.tv_sec>0||tv.tv_usec>0) && tv.tv_sec<2,"select interruption returns EINTR and remaining timeout");
  require(sigaction(SIGUSR1,&previous,NULL)==0,"select restore signal handler");
+ require(sigprocmask(SIG_SETMASK,&original_mask,NULL)==0,"select restore inherited signal mask");
  close(fds[0]);FD_ZERO(&readfds);FD_SET(fds[0],&readfds);tv=(struct timeval){0,0};errno=0;
  require(syscall(SYS_select,fds[1]+1,&readfds,NULL,NULL,&tv)==-1 && errno==EBADF,"select closed fd preserves EBADF");
  close(fds[1]);
