@@ -8,6 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -49,19 +50,19 @@ class ScreenshotTest {
             // dismissed, so take Alpine — a ~3 MB rootfs — to get past it.
             if (device.wait(Until.findObject(By.text("Set up Pocket Shell")), 15_000) != null) {
                 capture("first_run_setup")
-                device.findObject(By.text("Alpine Linux"))?.click()
+                requireNotNull(device.findObject(By.text("Alpine Linux"))) { "Alpine setup choice is missing" }.click()
                 val setupTimeout = InstrumentationRegistry.getArguments().getString("setupTimeoutMs")?.toLongOrNull()
                     ?: 20 * 60_000L
                 require(setupTimeout > 0)
                 val deadline = android.os.SystemClock.elapsedRealtime() + setupTimeout
                 while (android.os.SystemClock.elapsedRealtime() < deadline &&
-                    !device.hasObject(By.clazz(TERMINAL)) &&
+                    !device.hasObject(By.descContains(TERMINAL_READY_DESCRIPTION)) &&
                     !device.hasObject(By.text("Couldn't set up Linux"))) {
                     // Wait for the terminal while also checking for a recoverable setup error.
-                    device.wait(Until.hasObject(By.clazz(TERMINAL)), 1_000)
+                    device.wait(Until.hasObject(By.descContains(TERMINAL_READY_DESCRIPTION)), 1_000)
                 }
             }
-            if (device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000) == null) {
+            if (device.wait(Until.findObject(By.descContains(TERMINAL_READY_DESCRIPTION)), 15_000) == null) {
                 // A failed or stalled install must fail the run and retain diagnostics.
                 capture("setup_failed")
                 device.dumpWindowHierarchy(File(outDir, "setup-failure.xml"))
@@ -70,16 +71,17 @@ class ScreenshotTest {
                     .mapNotNull { it.text }.filter { it.isNotBlank() }
                 throw AssertionError("Fresh Alpine setup did not reach a terminal: " + messages.joinToString(" | "))
             }
-            Thread.sleep(1_500) // let the shell prompt actually render
+            device.waitForIdle()
             capture("launch_shell")
 
             // Focus the terminal (window focus alone doesn't route text input;
             // it needs an explicit tap), then run a real command and capture it.
-            device.findObject(By.clazz(TERMINAL))?.click()
-            Thread.sleep(300)
+            device.findObject(By.descContains(TERMINAL_READY_DESCRIPTION))?.click()
+            device.waitForIdle()
             device.executeShellCommand("input text echo%sPOCKETSHELL_SCREENSHOT_DEMO")
             device.pressEnter()
-            Thread.sleep(1_000)
+            assertTrue("A real shell command must produce its output line",
+                device.wait(Until.hasObject(By.descContains("\nPOCKETSHELL_SCREENSHOT_DEMO\n")), 10_000))
             capture("command_output")
 
             device.findObject(By.text("⚙"))?.click()
@@ -93,27 +95,27 @@ class ScreenshotTest {
                         device.displayWidth / 2, (device.displayHeight * 0.72).toInt(),
                         device.displayWidth / 2, (device.displayHeight * 0.38).toInt(), 12,
                     )
-                    Thread.sleep(400)
+                    device.waitForIdle()
                 }
             }
             capture("settings_keyboard")
             device.pressBack()
-            Thread.sleep(300)
+            device.waitForIdle()
 
             device.findObject(By.text("AI"))?.click()
-            Thread.sleep(500)
+            device.waitForIdle()
             capture("copilot_panel")
             device.findObject(By.text("AI"))?.click() // close it again
-            Thread.sleep(300)
+            device.waitForIdle()
 
             device.findObject(By.text("Theme"))?.click()
-            Thread.sleep(500)
+            device.waitForIdle()
             capture("theme_picker")
             device.pressBack()
-            Thread.sleep(300)
+            device.waitForIdle()
 
             device.findObject(By.text("Connect"))?.click()
-            Thread.sleep(700)
+            device.waitForIdle()
             capture("connections")
             device.pressBack()
         }
@@ -123,6 +125,8 @@ class ScreenshotTest {
 
     private companion object {
         const val TAG = "PocketShellScreenshotTest"
-        const val TERMINAL = "network.ght.pocketshell.term.TerminalView"
+        // TerminalView exposes android.view.View to accessibility. Its transcript
+        // proves setup reached the actual shell and identifies the focus target.
+        const val TERMINAL_READY_DESCRIPTION = "Pocket Shell is ready."
     }
 }
