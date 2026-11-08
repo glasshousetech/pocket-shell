@@ -16,13 +16,22 @@ index 638056e..6813272 100644
  		if (status != 0)
  			continue;
 diff --git a/src/tracee/reg.c b/src/tracee/reg.c
-index 3859f8e..4ea1468 100644
+index 3859f8e..1556d59 100644
 --- a/src/tracee/reg.c
 +++ b/src/tracee/reg.c
-@@ -301,6 +301,11 @@ int push_specific_regs(Tracee *tracee, bool including_sysnum)
+@@ -40,6 +40,7 @@
+ 
+ #include "syscall/sysnum.h"
+ #include "tracee/reg.h"
++#include "tracee/seccomp.h"
+ #include "tracee/abi.h"
+ #include "cli/note.h"
+ #include "compat.h"
+@@ -301,6 +302,12 @@ int push_specific_regs(Tracee *tracee, bool including_sysnum)
  			RegVersion restore_from = ORIGINAL;
  			if (tracee->restore_original_regs_after_seccomp_event) {
  				restore_from = ORIGINAL_SECCOMP_REWRITE;
++				finish_seccomp_select(tracee);
 +				if (tracee->seccomp_dup2_same_fd) {
 +					if ((int) REG(tracee, CURRENT, SYSARG_RESULT) >= 0)
 +						REG(tracee, CURRENT, SYSARG_RESULT) = REG(tracee, ORIGINAL_SECCOMP_REWRITE, SYSARG_1);
@@ -31,7 +40,7 @@ index 3859f8e..4ea1468 100644
  				tracee->restore_original_regs_after_seccomp_event = false;
  			}
  			/* Restore the sysarg register only if it is
-@@ -381,6 +386,40 @@ int push_regs(Tracee *tracee) {
+@@ -381,6 +388,40 @@ int push_regs(Tracee *tracee) {
  	return push_specific_regs(tracee, true);
  }
  
@@ -85,10 +94,59 @@ index 4536388..adcf995 100644
  extern word_t peek_reg(const Tracee *tracee, RegVersion version, Reg reg);
  extern void poke_reg(Tracee *tracee, Reg reg, word_t value);
 diff --git a/src/tracee/seccomp.c b/src/tracee/seccomp.c
-index e0692da..7a9c7d5 100644
+index e0692da..6c8fe64 100644
 --- a/src/tracee/seccomp.c
 +++ b/src/tracee/seccomp.c
-@@ -132,6 +132,82 @@ static int handle_seccomp_event_common(Tracee *tracee)
+@@ -6,6 +6,7 @@
+ #include <string.h>    /* memset   */
+ #include <linux/net.h> /* SYS_SENDMMSG */
+ #include <assert.h>    /* assert(3), */
++#include <stdint.h>    /* int32_t, int64_t, INT64_MAX */
+ 
+ #include "extension/extension.h"
+ #include "cli/note.h"
+@@ -17,6 +18,40 @@
+ 
+ static int handle_seccomp_event_common(Tracee *tracee);
+ 
++/* pselect6 updates its kernel timespec. Preserve Linux select's timeval
++ * write-back too, including when a signal interrupts the wait. */
++void finish_seccomp_select(Tracee *tracee)
++{
++	word_t tv_addr = tracee->seccomp_select_timeval;
++	word_t ts_addr = tracee->seccomp_select_timespec;
++	if (tv_addr == 0)
++		return;
++	tracee->seccomp_select_timeval = 0;
++	tracee->seccomp_select_timespec = 0;
++
++	int status;
++	if ((sizeof_word(tracee) == 4)) {
++		int32_t time[2];
++		status = read_data(tracee, time, ts_addr, sizeof(time));
++		if (status == 0) {
++			time[1] /= 1000;
++			status = write_data(tracee, tv_addr, time, sizeof(time));
++		}
++	} else {
++		int64_t time[2];
++		status = read_data(tracee, time, ts_addr, sizeof(time));
++		if (status == 0) {
++			time[1] /= 1000;
++			status = write_data(tracee, tv_addr, time, sizeof(time));
++		}
++	}
++	/* Linux ignores a failed timeout write-back, except that an interrupted
++	 * call with an unwritable timeout must not be automatically restarted. */
++	if (status != 0 && (int)peek_reg(tracee, CURRENT, SYSARG_RESULT) == -514)
++		poke_reg(tracee, SYSARG_RESULT, -EINTR);
++}
++
++
+ /**
+  * Restart syscall that caused seccomp event
+  * after changing it in tracee registers
+@@ -132,6 +167,134 @@ static int handle_seccomp_event_common(Tracee *tracee)
  	}
  
  	switch (sysnum) {
@@ -142,6 +200,58 @@ index e0692da..7a9c7d5 100644
 +		break;
 +
 +
++
++	case PR_select:
++	{
++		/* Android permits pselect6 but rejects the legacy select syscall.
++		 * Keep the caller's fd sets, wait semantics and timeout write-back. */
++		word_t tv_addr = peek_reg(tracee, CURRENT, SYSARG_5);
++		word_t ts_addr = 0;
++		if (tv_addr != 0) {
++			int64_t tv[2];
++			int32_t narrow[2];
++			bool is32 = (sizeof_word(tracee) == 4);
++			if (read_data(tracee, is32 ? (void *)narrow : (void *)tv,
++					tv_addr, is32 ? sizeof(narrow) : sizeof(tv))) {
++				set_result_after_seccomp(tracee, -EFAULT);
++				break;
++			}
++			if (is32) {
++				tv[0] = narrow[0];
++				tv[1] = narrow[1];
++			}
++			/* Linux normalizes nonnegative microseconds above one second. */
++			if (tv[0] < 0 || tv[1] < 0 || tv[0] > INT64_MAX - tv[1] / 1000000) {
++				set_result_after_seccomp(tracee, -EINVAL);
++				break;
++			}
++			int64_t ts[2] = { tv[0] + tv[1] / 1000000,
++				(tv[1] % 1000000) * 1000 };
++			if (is32) {
++				if (ts[0] > INT32_MAX) {
++					set_result_after_seccomp(tracee, -EINVAL);
++					break;
++				}
++				narrow[0] = ts[0];
++				narrow[1] = ts[1];
++			}
++			size_t size = is32 ? sizeof(narrow) : sizeof(ts);
++			ts_addr = alloc_mem(tracee, size);
++			if (write_data(tracee, ts_addr,
++					is32 ? (void *)narrow : (void *)ts, size)) {
++				set_result_after_seccomp(tracee, -EFAULT);
++				break;
++			}
++			tracee->seccomp_select_timeval = tv_addr;
++			tracee->seccomp_select_timespec = ts_addr;
++		}
++		set_sysnum(tracee, PR_pselect6);
++		poke_reg(tracee, SYSARG_5, ts_addr);
++		poke_reg(tracee, SYSARG_6, 0);
++		restart_syscall_after_seccomp(tracee);
++		break;
++	}
++
 +	case PR_poll:
 +	{
 +		int ms_arg = (int) peek_reg(tracee, CURRENT, SYSARG_3);
@@ -171,7 +281,7 @@ index e0692da..7a9c7d5 100644
  	case PR_open:
  		set_sysnum(tracee, PR_openat);
  		poke_reg(tracee, SYSARG_4, peek_reg(tracee, CURRENT, SYSARG_3));
-@@ -200,11 +276,12 @@ static int handle_seccomp_event_common(Tracee *tracee)
+@@ -200,11 +363,12 @@ static int handle_seccomp_event_common(Tracee *tracee)
  		restart_syscall_after_seccomp(tracee);
  		break;
  
@@ -185,7 +295,7 @@ index e0692da..7a9c7d5 100644
  		restart_syscall_after_seccomp(tracee);
  		break;
  
-@@ -386,8 +463,22 @@ static int handle_seccomp_event_common(Tracee *tracee)
+@@ -386,8 +550,22 @@ static int handle_seccomp_event_common(Tracee *tracee)
  	}
  #endif
  
@@ -208,6 +318,16 @@ index e0692da..7a9c7d5 100644
  		/* Set errno to -ENOSYS */
  		set_result_after_seccomp(tracee, -ENOSYS);
  	}
+diff --git a/src/tracee/seccomp.h b/src/tracee/seccomp.h
+index 4e1694d..3a2e2a5 100644
+--- a/src/tracee/seccomp.h
++++ b/src/tracee/seccomp.h
+@@ -18,3 +18,5 @@ struct compat_statfs {
+ 
+ int handle_seccomp_event(Tracee* tracee);
+ void fix_and_restart_enosys_syscall(Tracee* tracee);
++
++void finish_seccomp_select(Tracee *tracee);
 diff --git a/src/tracee/tracee.c b/src/tracee/tracee.c
 index e83584d..4d72a97 100644
 --- a/src/tracee/tracee.c
@@ -238,15 +358,18 @@ index e83584d..4d72a97 100644
  		if (child->as_ptracee.ptracer != NULL) {
  			/* Sanity check.  */
 diff --git a/src/tracee/tracee.h b/src/tracee/tracee.h
-index ef87540..74a8b36 100644
+index ef87540..1955d3d 100644
 --- a/src/tracee/tracee.h
 +++ b/src/tracee/tracee.h
-@@ -160,6 +160,10 @@ typedef struct tracee {
+@@ -160,6 +160,13 @@ typedef struct tracee {
  	bool _regs_were_changed;
  	bool restore_original_regs;
  	bool restore_original_regs_after_seccomp_event;
 +	/* Pending F_GETFD validation for a seccomp-rewritten dup2(fd, fd). */
 +	bool seccomp_dup2_same_fd;
++	/* Original timeval and temporary pselect6 timespec for select translation. */
++	word_t seccomp_select_timeval;
++	word_t seccomp_select_timespec;
 +	/* Restore the original fork registers at the child's first stop. */
 +	bool restore_regs_at_first_stop;
  

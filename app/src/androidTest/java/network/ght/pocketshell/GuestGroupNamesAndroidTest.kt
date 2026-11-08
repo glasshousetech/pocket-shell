@@ -196,15 +196,9 @@ class GuestGroupNamesAndroidTest {
             if (checkToolkit) {
                 Bootstrap::class.java.getDeclaredMethod("configure", Context::class.java, File::class.java, Distro::class.java)
                     .apply { isAccessible = true }.invoke(Bootstrap, context, root, distro)
-                // Compare TLS clients and a test-only HTTP index fetch. Production
-                // repositories and certificate verification are unchanged.
-                File(root, "tmp/pocketshell-probe-repositories").writeText(
-                    "http://dl-cdn.alpinelinux.org/alpine/v3.20/main\n")
+                // Exercise the real HTTPS package client before the complete installer.
                 val probeArgs = Userland.prootExecArgs(context, distro,
-                    "set -x; apk --version; " +
-                    "busybox timeout 20 busybox wget -S -O /tmp/pocketshell-https-index https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz; echo WGET_HTTPS_EXIT=$?; " +
-                    "busybox timeout 20 apk --repositories-file /tmp/pocketshell-probe-repositories update; echo APK_HTTP_EXIT=$?; " +
-                    "busybox timeout 20 apk update; rc=$?; echo APK_HTTPS_EXIT=${'$'}rc; exit ${'$'}rc")
+                    "set -x; apk --version; apk update")
                 val verboseProbeArgs = arrayOf(probeArgs.first(), "-v", "1") + probeArgs.drop(1)
                 val packageProbe = execute(context, verboseProbeArgs, trace = true)
                 assertEquals("Alpine package index: " + packageProbe.output, 0, packageProbe.code)

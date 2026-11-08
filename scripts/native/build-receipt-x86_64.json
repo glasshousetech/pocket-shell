@@ -4,7 +4,7 @@
   "ndk": "27.2.12479018",
   "api": 26,
   "abi": "x86_64",
-  "patchSha256": "7d4f9f3ee351ac766a1d3cb31111ff374080c130e506ff63545f88dac1cfaaaa",
-  "binarySha256": "2700ec41fd2dd7ed1b3744d5d450f97a6f71fdea224d99585b5ae05e63cbb72a",
+  "patchSha256": "d852ccd0104e53a15122482a2e481d137a99f4ced5028aae415efa7cd90aad73",
+  "binarySha256": "8e23b7404ed573975b6aa9c2f28ffb9086b415ae2efc1635bfa640f3cb2c68f3",
   "acceptance": "Build only; real Android app-context and upgrade tests are separate."
 }
