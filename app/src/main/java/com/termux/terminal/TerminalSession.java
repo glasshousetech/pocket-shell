@@ -6,14 +6,12 @@ import android.os.Message;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
+import android.system.StructPollfd;
 
 import java.io.File;
 import java.io.ByteArrayOutputStream;
 import java.io.FileDescriptor;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -33,6 +31,7 @@ public final class TerminalSession extends TerminalOutput {
 
     private static final int MSG_NEW_INPUT = 1;
     private static final int MSG_PROCESS_EXITED = 4;
+    private static final int MSG_OUTPUT_DRAINED = 5;
 
     public final String mHandle = UUID.randomUUID().toString();
 
@@ -69,6 +68,7 @@ public final class TerminalSession extends TerminalOutput {
      * {@link JNI#createSubprocess(String, String, String[], String[], int[], int, int)}.
      */
     private int mTerminalFileDescriptor;
+    private FileDescriptor mTerminalDescriptor;
 
     /** Set by the application for user identification of session, not by terminal. */
     public String mSessionName;
@@ -109,7 +109,7 @@ public final class TerminalSession extends TerminalOutput {
         if (mEmulator == null) {
             initializeEmulator(columns, rows);
         } else {
-            JNI.setPtyWindowSize(mTerminalFileDescriptor, rows, columns);
+            if (mTerminalFileDescriptor >= 0) JNI.setPtyWindowSize(mTerminalFileDescriptor, rows, columns);
             mEmulator.resize(columns, rows);
         }
     }
@@ -133,20 +133,64 @@ public final class TerminalSession extends TerminalOutput {
         mShellPid = processId[0];
 
         final FileDescriptor terminalFileDescriptorWrapped = wrapFileDescriptor(mTerminalFileDescriptor, mClient);
+        mTerminalDescriptor = terminalFileDescriptorWrapped;
+        final FileDescriptor[] exitSignal;
+        try {
+            exitSignal = Os.pipe();
+        } catch (ErrnoException failure) {
+            finishIfRunning();
+            final int failedPid = mShellPid;
+            new Thread(() -> JNI.waitFor(failedPid), "TermSessionFailedStartReaper").start();
+            JNI.close(mTerminalFileDescriptor);
+            mTerminalFileDescriptor = -1;
+            mShellPid = -1;
+            throw new IllegalStateException("Could not create terminal exit signal", failure);
+        }
 
         new Thread("TermSessionInputReader[pid=" + mShellPid + "]") {
             @Override
             public void run() {
-                try (InputStream termIn = new FileInputStream(terminalFileDescriptorWrapped)) {
-                    final byte[] buffer = new byte[4096];
+                final byte[] buffer = new byte[4096];
+                StructPollfd terminal = new StructPollfd();
+                terminal.fd = terminalFileDescriptorWrapped;
+                terminal.events = (short) OsConstants.POLLIN;
+                StructPollfd exited = new StructPollfd();
+                exited.fd = exitSignal[0];
+                exited.events = (short) OsConstants.POLLIN;
+                final StructPollfd[] descriptors = { terminal, exited };
+                boolean draining = false;
+                try {
                     while (true) {
-                        int read = termIn.read(buffer);
-                        if (read == -1) return;
-                        if (!mProcessToTerminalIOQueue.write(buffer, 0, read)) return;
+                        try {
+                            // The waiter wakes this poll when the shell exits. Drain bytes already
+                            // in the PTY without waiting for a descendant that keeps its slave open.
+                            Os.poll(descriptors, draining ? 0 : -1);
+                        } catch (ErrnoException failure) {
+                            if (failure.errno == OsConstants.EINTR) continue;
+                            throw failure;
+                        }
+                        if (exited.revents != 0) draining = true;
+                        if ((terminal.revents & (OsConstants.POLLIN | OsConstants.POLLHUP)) == 0) {
+                            if (draining || terminal.revents != 0) break;
+                            continue;
+                        }
+                        int read;
+                        try {
+                            read = Os.read(terminalFileDescriptorWrapped, buffer, 0, buffer.length);
+                        } catch (ErrnoException failure) {
+                            if (failure.errno == OsConstants.EINTR) continue;
+                            // Linux PTY masters return EIO when the last slave has closed.
+                            if (failure.errno == OsConstants.EIO) break;
+                            throw failure;
+                        }
+                        if (read <= 0 || !mProcessToTerminalIOQueue.write(buffer, 0, read)) break;
                         mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
                     }
-                } catch (Exception e) {
-                    // Ignore, just shutting down.
+                } catch (Exception failure) {
+                    mClient.logWarn(LOG_TAG, "Terminal output read failed: " + failure.getMessage());
+                } finally {
+                    try { Os.close(exitSignal[0]); } catch (ErrnoException ignored) { }
+                    mMainThreadHandler.sendEmptyMessage(MSG_OUTPUT_DRAINED);
                 }
             }
         }.start();
@@ -155,14 +199,21 @@ public final class TerminalSession extends TerminalOutput {
             @Override
             public void run() {
                 final byte[] buffer = new byte[4096];
-                try (FileOutputStream termOut = new FileOutputStream(terminalFileDescriptorWrapped)) {
+                try {
                     while (true) {
-                        int bytesToWrite = mTerminalToProcessIOQueue.read(buffer, true);
-                        if (bytesToWrite == -1) return;
-                        termOut.write(buffer, 0, bytesToWrite);
+                        int count = mTerminalToProcessIOQueue.read(buffer, true);
+                        if (count == -1) return;
+                        int offset = 0;
+                        while (offset < count) {
+                            try {
+                                offset += Os.write(terminalFileDescriptorWrapped, buffer, offset, count - offset);
+                            } catch (ErrnoException failure) {
+                                if (failure.errno != OsConstants.EINTR) throw failure;
+                            }
+                        }
                     }
-                } catch (IOException e) {
-                    // Ignore.
+                } catch (Exception failure) {
+                    if (isRunning()) mClient.logWarn(LOG_TAG, "Terminal input write failed: " + failure.getMessage());
                 }
             }
         }.start();
@@ -172,6 +223,24 @@ public final class TerminalSession extends TerminalOutput {
             public void run() {
                 int processExitCode = JNI.waitFor(mShellPid);
                 mMainThreadHandler.sendMessage(mMainThreadHandler.obtainMessage(MSG_PROCESS_EXITED, processExitCode));
+                try {
+                    while (true) {
+                        try {
+                            Os.write(exitSignal[1], new byte[] { 1 }, 0, 1);
+                            break;
+                        } catch (ErrnoException failure) {
+                            if (failure.errno != OsConstants.EINTR) throw failure;
+                        }
+                    }
+                } catch (ErrnoException failure) {
+                    // EPIPE means the reader already saw EOF and posted OUTPUT_DRAINED.
+                    if (failure.errno != OsConstants.EPIPE)
+                        mClient.logWarn(LOG_TAG, "Terminal exit signal failed: " + failure.getMessage());
+                } catch (IOException failure) {
+                    mClient.logWarn(LOG_TAG, "Terminal exit signal interrupted: " + failure.getMessage());
+                } finally {
+                    try { Os.close(exitSignal[1]); } catch (ErrnoException ignored) { }
+                }
             }
         }.start();
 
@@ -288,7 +357,10 @@ public final class TerminalSession extends TerminalOutput {
         // Stop the reader and writer threads, and close the I/O streams
         mTerminalToProcessIOQueue.close();
         mProcessToTerminalIOQueue.close();
-        JNI.close(mTerminalFileDescriptor);
+        try { Os.close(mTerminalDescriptor); } catch (ErrnoException failure) {
+            mClient.logWarn(LOG_TAG, "Terminal close failed: " + failure.getMessage());
+        }
+        mTerminalFileDescriptor = -1;
     }
 
     @Override
@@ -373,9 +445,13 @@ public final class TerminalSession extends TerminalOutput {
     class MainThreadHandler extends Handler {
 
         final byte[] mReceiveBuffer = new byte[4 * 1024];
+        private boolean processExited;
+        private boolean outputDrained;
+        private int pendingExitCode;
 
         @Override
         public void handleMessage(Message msg) {
+            if (mShellPid == -1) return;
             int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
             if (bytesRead > 0) {
                 mEmulator.append(mReceiveBuffer, bytesRead);
@@ -383,7 +459,17 @@ public final class TerminalSession extends TerminalOutput {
             }
 
             if (msg.what == MSG_PROCESS_EXITED) {
-                int exitCode = (Integer) msg.obj;
+                processExited = true;
+                pendingExitCode = (Integer) msg.obj;
+            } else if (msg.what == MSG_OUTPUT_DRAINED) {
+                outputDrained = true;
+            }
+            if (processExited && outputDrained) {
+                // No producer remains. Render every retained byte before the exit marker and
+                // completion callback, even when waitpid beat the reader/main-thread messages.
+                while ((bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false)) > 0)
+                    mEmulator.append(mReceiveBuffer, bytesRead);
+                int exitCode = pendingExitCode;
                 cleanupResources(exitCode);
 
                 String exitDescription = "\r\n[Process completed";

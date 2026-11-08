@@ -73,6 +73,8 @@ class TerminalWorkspaceUiTest {
         val service = (serviceRule.bindService(Intent(context, TermService::class.java)) as TermService.LocalBinder).service
         lateinit var fixture: TermSession
         instrumentation.runOnMainSync {
+            // This test owns an isolated emulator and expects exactly its one fixture.
+            service.sessions.toList().forEach(service::closeSession)
             val system = service.newSession(SessionMode.SYSTEM)
             system.session.updateSize(80, 24)
             // This controlled PTY stands in for an already-running Linux session.
@@ -166,8 +168,10 @@ class TerminalWorkspaceUiTest {
                     assertEquals(1, service.sessions.size)
                     assertSame(fixture.session, service.sessions.single().session)
                 }
-                val keyboard = device.wait(Until.findObject(By.pkg("com.google.android.inputmethod.latin")), 3000)
-                    ?: device.wait(Until.findObject(By.pkg("com.android.inputmethod.latin")), 1000)
+                val imePackage = android.provider.Settings.Secure.getString(context.contentResolver,
+                    android.provider.Settings.Secure.DEFAULT_INPUT_METHOD).substringBefore('/')
+                assertTrue("A keyboard is selected", imePackage.isNotBlank())
+                val keyboard = device.wait(Until.findObject(By.pkg(imePackage)), 5000)
                 if (keyboard == null) {
                     device.takeScreenshot(File(dir,"keyboard-return-failure.png"))
                     device.dumpWindowHierarchy(File(dir,"keyboard-return-failure.xml"))

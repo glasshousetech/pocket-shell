@@ -48,7 +48,7 @@ object TermCore {
         onFinished: (TerminalSession) -> Unit,
     ): TerminalSession {
         TabIdentity.requireValid(tabId)
-        val client = RailSessionClient(onRedraw, onTitle, onFinished) {
+        val client = RailSessionClient(onRedraw, onTitle, onFinished, context.applicationContext) {
             android.widget.Toast.makeText(context.applicationContext,
                 "Input could not be queued. The session has ended or is not reading input. Your reviewed draft is kept.",
                 android.widget.Toast.LENGTH_LONG).show()
@@ -113,6 +113,7 @@ class RailSessionClient(
     private val onRedraw: (TerminalSession) -> Unit,
     private val onTitle: (TerminalSession) -> Unit,
     private val onFinished: (TerminalSession) -> Unit,
+    private val diagnosticsContext: Context? = null,
     private val onInputRejected: () -> Unit = {},
 ) : TerminalSessionClient {
 
@@ -137,7 +138,20 @@ class RailSessionClient(
     override fun getTerminalCursorStyle(): Int? = null
 
     override fun logError(tag: String?, message: String?) { Log.e(tag ?: TAG, message ?: "") }
-    override fun logWarn(tag: String?, message: String?) { Log.w(tag ?: TAG, message ?: "") }
+    override fun logWarn(tag: String?, message: String?) {
+        Log.w(tag ?: TAG, message ?: "")
+        if (tag == "TerminalSession" && diagnosticsContext != null) {
+            val event = when {
+                message?.startsWith("Terminal output read failed:") == true -> "output_read_failed"
+                message?.startsWith("Terminal input write failed:") == true -> "input_write_failed"
+                message?.startsWith("Terminal exit signal") == true -> "exit_signal_failed"
+                message?.startsWith("Terminal close failed:") == true -> "close_failed"
+                else -> null
+            }
+            // Keep terminal content, commands and native exception text out of durable exports.
+            if (event != null) DiagnosticLog.record(diagnosticsContext, "terminal_io", event)
+        }
+    }
     override fun logInfo(tag: String?, message: String?) { Log.i(tag ?: TAG, message ?: "") }
     override fun logDebug(tag: String?, message: String?) { Log.d(tag ?: TAG, message ?: "") }
     override fun logVerbose(tag: String?, message: String?) { Log.v(tag ?: TAG, message ?: "") }
