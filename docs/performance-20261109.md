@@ -107,3 +107,22 @@ scrollback; replaying a long file would stall cold start, and the rest stays sea
   longer in memory), each row exactly once, and closing the tab deletes the file.
 - Input, output and persistence suites: OK (32). UI suites: OK (29). Theme and connection-library
   suites were run on hosted CI (API 34) only; on this API 35 image they fail before this change.
+
+## Deployment — 0.6.0, November 9, 2026
+
+Connor: "Do all the fixes first, deploy it."
+
+- Tag `v0.6.0` at `d1684c0`; signed release run 42710384573 passed, including the same-signer
+  upgrade from the public 0.5.4 APK (prepare/verify) and the signed runtime smoke (6 tests).
+- APK SHA-256 `473ea7b3a4619cf09eab988cadc27575e4e1e835904b099ee3b5d2fc69d266ae`, signer
+  `ceee0b98…1420`, versionCode 33, not debuggable.
+- Live: `https://dl.ght.network/pocketshell.apk` (stable), immutable
+  `https://dl.ght.network/apps/pocketshell/0.6.0-473ea7b3a461/pocketshell-0.6.0.apk` (exact path
+  added to the Caddy download allow-list), `pocketshell-latest.json` (versionCode 33).
+  `scripts/verify-deploy.sh v0.6.0`: OK. GitHub `releases/latest` is v0.6.0, so the in-app
+  updater offers it.
+- Rollback: `/opt/halo-dl/pocketshell.apk.bak-0.5.4-*`, `pocketshell-latest.json.bak-0.5.4-*` and
+  `/etc/caddy/Caddyfile.bak-pocketshell-0.6.0-*` on gh-cloud-01; the 0.5.4 immutable URL still serves.
+- Website: ght-network PR #96 removed Pocket Shell from the download hold and lists 0.6.0.
+- Not done: the Fold7 itself was not updated remotely (installing ends running sessions). Update
+  from Settings → Check for updates, or the download link.
