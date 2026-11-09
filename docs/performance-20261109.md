@@ -60,7 +60,16 @@ LatinIME, animations off), own adb server port; no other agent's emulator was to
   and `ConnectionLibraryTest.createFavoriteSearchReloadAndRemoveUsingTheRealUi` fail identically on
   the unmodified rc.9 build on the same API 35 emulator, so they are pre-existing on that image and
   not caused by this change; hosted CI runs them on API 34.
-- Tests ran on the source before the version bump to rc.10 (metadata only). Hosted CI runs the
-  full suite on the pushed revision.
+- Tests ran on the source before the version bump to rc.10 (metadata only).
+- Hosted CI on the pushed revision `47728da` (run 42686728334, API 34): build passed and the full
+  native regression suite is **OK (67 tests)**, including the new keyboard regression tests and the
+  theme and connection-library tests that failed only on the API 35 image. The `screenshots` job's
+  `ScreenshotTest` reported OK (1 test); the hosted emulator then died before `adb logcat`
+  ("could not connect to TCP port 5554"), so the job was re-run.
+- Signed candidate: GitHub draft release `v0.6.0-rc.10` (run 42686737394). `app-release.apk`
+  SHA-256 `3d583e124dc66d892623cc6c784a8e5aee3df1ef5a0192c914246b1705101c7b`, signer
+  `ceee0b98…1420` (same key as every prior release, so it upgrades in place), versionCode 32,
+  not debuggable. Installed on the API 35 emulator: cold start 355 ms to first-run setup, no crash
+  or ANR.
 - NOT RUN: physical Fold7 with SwiftKey. An emulator cannot show how SwiftKey reacts to the
   keyboard restart after Tab or arrows mid-word; check that on the handset.
