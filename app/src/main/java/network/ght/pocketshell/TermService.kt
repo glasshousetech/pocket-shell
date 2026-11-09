@@ -224,10 +224,34 @@ class TermService : Service() {
     /** Activity registers this to repaint the visible TerminalView on screen changes. */
     var onRedraw: ((TerminalSession) -> Unit)? = null
 
-    // Snapshot history is read from the main-thread-owned emulator. Re-read only tabs whose
-    // screen changed since the last capture; idle tabs reuse their previous capture.
+    // Scrollback goes to SessionHistory as it happens. The snapshot only needs the screen rows
+    // not yet in that history, re-read only for tabs whose screen changed since the last capture.
     private val historyDirty = HashSet<Int>()
     private val historyCache = HashMap<Int, String>()
+    private val historyRecorders = HashMap<Int, SessionHistory.Recorder>()
+
+    /** Start recording [session]'s scrollback into its tab's complete history. */
+    private fun recordHistory(id: Int, tabId: String, session: TerminalSession, loggedScreenRows: Int) {
+        historyRecorders.remove(id)?.close()
+        val recorder = SessionHistory.recorder(this, tabId)
+        session.setHistoryListener(recorder, loggedScreenRows)
+        historyRecorders[id] = recorder
+    }
+
+    /** The tab's complete history plus what is on screen now. Main thread; the file read is off it. */
+    suspend fun fullHistory(holder: TermSession): String {
+        historyRecorders[holder.id]?.flush()
+        val screen = runCatching { TerminalSnapshot.searchableScreenText(holder.session) }.getOrDefault("")
+        val saved = withContext(Dispatchers.IO) { SessionHistory.readAll(applicationContext, holder.tabId) }
+        return if (screen.isEmpty()) saved.removeSuffix("\n") else saved + screen
+    }
+
+    /** Clear Scrollback also removes the tab's saved history on device storage. */
+    fun clearHistory(holder: TermSession) {
+        historyRecorders[holder.id]?.discardPending()
+        SessionHistory.delete(this, holder.tabId)
+        forgetHistory(holder.id)
+    }
 
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -328,6 +352,7 @@ class TermService : Service() {
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { s -> alive.value = false; DiagnosticLog.record(this, "session", "process_exit", tabId = tabId, exitCode = s.exitStatus); refreshNotification() },
         )
+        recordHistory(id, tabId, session, 0)
         val holder = TermSession(id, label, alive, session, mode, tabId, command, connectionProfile,
             mutableStateOf(TabNames.normalize(customName)), mutableStateOf(TabColors.byId(color)?.id), remoteWorkspace)
         sessions.add(holder)
@@ -355,6 +380,7 @@ class TermService : Service() {
             if (selectedSessionId.value == holder.id) selectedSessionId.value = replacement.id
             if (reviewedTextTarget.value == holder.id) reviewedTextTarget.value = replacement.id
             TranscriptLogger.reset(holder.id)
+            historyRecorders.remove(holder.id)?.close()
             forgetHistory(holder.id)
             persistSnapshot()
             DiagnosticLog.record(this, "session", "reconnect_started", tabId = holder.tabId)
@@ -424,6 +450,8 @@ class TermService : Service() {
             selectedSessionId.value = sessions.getOrNull(previousIndex.coerceAtMost(sessions.lastIndex))?.id
         }
         TranscriptLogger.reset(holder.id)
+        historyRecorders.remove(holder.id)?.close()
+        SessionHistory.delete(this, holder.tabId)
         forgetHistory(holder.id)
         // The UI always keeps at least one session open, so we don't self-stop here;
         // the user exits explicitly via the notification's Exit action.
@@ -440,7 +468,10 @@ class TermService : Service() {
     private fun restoreFromSnapshot() {
         if (sessions.isNotEmpty()) return
         val saved = SessionStore.load(this)
-        if (saved.isEmpty()) return
+        if (saved.isEmpty()) {
+            SessionHistory.retainOnly(this, emptySet()) // History of tabs that no longer exist.
+            return
+        }
 
         var restoredAny = false
         saved.forEach { entry ->
@@ -460,7 +491,10 @@ class TermService : Service() {
         }
         // Consume the snapshot only once something actually came back from it,
         // so a transient failure doesn't silently discard the user's history.
-        if (restoredAny) SessionStore.clear(this)
+        if (restoredAny) {
+            SessionStore.clear(this)
+            SessionHistory.retainOnly(this, sessions.map { it.tabId }.toSet())
+        }
     }
 
     private fun restoreSession(entry: SessionStore.Saved): TermSession {
@@ -487,8 +521,14 @@ class TermService : Service() {
         // emulator already exists. That lets us inject the saved scrollback
         // before any real UI has attached.
         session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
-        injectRestoredTranscript(session, entry.transcript, entry.restoreNotice ?:
+        // The snapshot holds screen rows that had not reached the history file yet (or, from builds
+        // before 0.6.0-rc.11, the whole scrollback). Add them, then replay the recent end of the history.
+        if (entry.transcript.isNotBlank()) SessionHistory.append(this, tabId, entry.transcript.trimEnd() + "\n")
+        val history = SessionHistory.tail(this, tabId, RESTORED_SCROLLBACK_LINES)
+        injectRestoredTranscript(session, history, entry.restoreNotice ?:
             if (resumeCommand != null) "Reconnecting to the saved remote workspace; output above is historical." else null)
+        // Everything now above the cursor is already in the history file.
+        recordHistory(id, tabId, session, session.emulator?.cursorRow ?: 0)
 
         val holder = TermSession(id, label, alive, session, entry.mode, tabId,
             resumeCommand ?: entry.connectionProfile?.command(tabId) ?: entry.startupCommand,
@@ -509,8 +549,7 @@ class TermService : Service() {
         // transcriptText only ever contains rendered characters (no escape codes),
         // but it joins rows with bare '\n'; the emulator needs '\r\n' to actually
         // return to column 0, or replayed lines drift diagonally across the screen.
-        // Older builds saved all 20,000 rows; replaying that on the main thread stalled cold start.
-        val normalized = TerminalSnapshot.lastLines(transcript, PERSISTED_HISTORY_ROWS).replace("\r\n", "\n").replace("\n", "\r\n")
+        val normalized = transcript.removeSuffix("\n").replace("\r\n", "\n").replace("\n", "\r\n")
         val marker = "[2m── session restored (best-effort history — not a live process) ──[0m\r\n\r\n"
         val text = "$normalized\r\n$marker" + (notice?.let { it + "\r\n" } ?: "")
         val bytes = text.toByteArray(Charsets.UTF_8)
@@ -544,14 +583,12 @@ class TermService : Service() {
     }
 
     /**
-     * The tab's recent history for the snapshot. Capture scans emulator rows on the main thread,
-     * so it is bounded to [PERSISTED_HISTORY_ROWS] and repeated only after the screen changed.
+     * Screen rows not yet in the tab's history file. Scrollback is already on disk, so this is at
+     * most one screenful, re-read only after the screen changed.
      */
     private fun historyFor(holder: TermSession): String {
         if (holder.id !in historyDirty) historyCache[holder.id]?.let { return it }
-        val text = runCatching {
-            TerminalSnapshot.tail(holder.session, maxChars = Int.MAX_VALUE, maxRows = PERSISTED_HISTORY_ROWS)
-        }.getOrNull().orEmpty()
+        val text = runCatching { TerminalSnapshot.unloggedScreenText(holder.session) }.getOrNull().orEmpty()
         historyCache[holder.id] = text
         historyDirty.remove(holder.id)
         return text
@@ -564,6 +601,7 @@ class TermService : Service() {
 
     /** Recents-swipe often precedes the process actually being killed — snapshot now. */
     override fun onTaskRemoved(rootIntent: Intent?) {
+        historyRecorders.values.forEach { it.flush() }
         persistSnapshot()
         super.onTaskRemoved(rootIntent)
     }
@@ -579,6 +617,9 @@ class TermService : Service() {
         sessions.clear()
         historyDirty.clear()
         historyCache.clear()
+        historyRecorders.values.forEach { it.close() }
+        historyRecorders.clear()
+        SessionHistory.retainOnly(this, emptySet())
         releaseWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -672,6 +713,7 @@ class TermService : Service() {
         snapshotHandler.removeCallbacks(snapshotTask)
         // Graceful stops (e.g. system shutdown) get one last save too; kills that
         // skip onDestroy entirely are exactly why the periodic timer exists.
+        historyRecorders.values.forEach { it.flush() }
         persistSnapshot()
         releaseWakeLock()
         super.onDestroy()
@@ -686,11 +728,11 @@ class TermService : Service() {
         private const val SNAPSHOT_INTERVAL_MS = 20_000L
 
         /**
-         * Rows of history kept per tab across a full process kill. Capturing them runs on the main
-         * thread, so this bounds a periodic main-thread scan (2,000 rows takes a few ms; all 20,000
-         * stalled typing). Raise it if more restored history matters more than that cost.
+         * Lines of a tab's history replayed into its live scrollback after a process kill. The full
+         * history stays on device storage (and in Find in output); replaying it all would stall cold
+         * start on the main thread. Raise it if a deeper live scrollback after restore is worth that.
          */
-        internal const val PERSISTED_HISTORY_ROWS = 2_000
+        internal const val RESTORED_SCROLLBACK_LINES = 5_000
 
         /** Initial emulator size for a restored session; the real TerminalView resizes it. */
         private const val DEFAULT_COLUMNS = 80

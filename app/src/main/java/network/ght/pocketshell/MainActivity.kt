@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.res.ResourcesCompat
 import network.ght.pocketshell.ui.*
@@ -177,6 +178,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     // Phone terminals need ESC/TAB/CTRL/navigation constantly. Keep the row
     // visible by default; the handle still collapses it when screen space wins.
     var extraKeysOpen by remember { mutableStateOf(true) }
+    var workspaceCollapsed by remember { mutableStateOf(WorkspacePrefs.workspaceCollapsed(ctx)) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
     var textInputSessionId by service.reviewedTextTarget
@@ -511,10 +513,17 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         val holder = sessions.firstOrNull { it.id == state.targetId }
         if (holder == null) { state.error = "The original tab is no longer open."; return }
         state.outputLabel = holder.displayName
-        state.outputLines = holder.session.emulator?.screen?.transcriptText.orEmpty().split('\n')
-        state.matchIndex = 0
         state.error = null
-        DiagnosticLog.record(ctx, "output_search", "snapshot_captured", tabId = holder.tabId)
+        // Search the tab's complete history on device storage, not just what is in memory.
+        scope.launch {
+            val text = runCatching { service.fullHistory(holder) }.getOrElse {
+                state.error = "Saved history could not be read. Showing what is in memory."
+                holder.session.emulator?.screen?.transcriptText.orEmpty()
+            }
+            state.outputLines = text.split('\n')
+            state.matchIndex = 0
+            DiagnosticLog.record(ctx, "output_search", "snapshot_captured", tabId = holder.tabId)
+        }
     }
 
     if (service.workbench.page != null) {
@@ -672,7 +681,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                 TabAction.MoveLeft -> service.moveSession(holder,-1)
                 TabAction.MoveRight -> service.moveSession(holder,1)
                 TabAction.CopyOutput -> Clip.copy(TabOutput.forClipboard(holder.session.emulator?.screen?.transcriptText))
-                TabAction.ClearScrollback -> { holder.session.emulator?.screen?.clearTranscript(); termViewRef.value?.let(TerminalInteraction::redraw) }
+                TabAction.ClearScrollback -> { holder.session.emulator?.screen?.clearTranscript(); service.clearHistory(holder); termViewRef.value?.let(TerminalInteraction::redraw) }
                 TabAction.ResetTerminal -> { if (holder.session.emulator != null) holder.session.reset(); termViewRef.value?.let(TerminalInteraction::redraw) }
                 TabAction.CloseOthers -> { service.closeOtherSessions(holder); showSession(holder) }
                 TabAction.Close -> closeTargetId = holder.id
@@ -702,10 +711,15 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onTheme = { themeOpen = true },
             onCopilot = { copilotOpen = !copilotOpen },
             onSettings = { settingsOpen = true },
+            collapsed = workspaceCollapsed,
+            onToggleCollapsed = {
+                workspaceCollapsed = !workspaceCollapsed
+                WorkspacePrefs.setWorkspaceCollapsed(ctx, workspaceCollapsed)
+            },
         )
     }
     Row(modifier = Modifier.fillMaxSize()) {
-      if (expandedWorkspace) Box(Modifier.width(220.dp).fillMaxHeight()) { controls(true) }
+      if (expandedWorkspace) Box(Modifier.width(if (workspaceCollapsed) 60.dp else 220.dp).fillMaxHeight()) { controls(true) }
       Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
         if (!expandedWorkspace) controls(false)
 
@@ -814,6 +828,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     keys = extraKeys,
                     onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
                     onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
+                    onEnter = { sendKey(KeyEvent.KEYCODE_ENTER) },
                     onCtrl = { viewClient.toggleCtrl() },
                     onAlt = { viewClient.toggleAlt() },
                     onShift = { viewClient.toggleShift() },
@@ -907,6 +922,8 @@ private fun TabRail(
     onTheme: () -> Unit,
     onCopilot: () -> Unit,
     onSettings: () -> Unit,
+    collapsed: Boolean = false,
+    onToggleCollapsed: () -> Unit = {},
 ) {
     var menuFor by remember { mutableStateOf<Int?>(null) }
     var railSize by remember { mutableStateOf(IntSize.Zero) }
@@ -976,10 +993,53 @@ private fun TabRail(
               } }
             }
     }
+    // Collapsed sidebar: numbered tab buttons keep every tab one tap away in a 60 dp rail.
+    val compactTabs: @Composable () -> Unit = {
+        sessions.forEachIndexed { i, holder ->
+            key(holder.id) { Box {
+                val active = i == activeIndex
+                val label = holder.displayName
+                val accent = holder.accent()
+                Box(
+                    Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(if (active) RailBg else RailSurface)
+                        .semantics { contentDescription = "Tab ${i + 1}: $label"; selected = active }
+                        .combinedClickable(onClick = { onSelect(i) }, onLongClickLabel = "Tab options",
+                            onLongClick = { menuFor = holder.id; onMenuOpened() }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("${i + 1}", color = if (active) RailPromptText else RailAccentDim, fontFamily = RailMono, fontSize = 13.sp)
+                    Text("●", color = if (holder.alive.value) accent else RailDimText, fontSize = 7.sp,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(5.dp))
+                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.6f).height(2.dp)
+                        .background(if (active) accent else Color.Transparent))
+                }
+                TabMenu(expanded = menuFor == holder.id, holder = holder, index = i, count = sessions.size,
+                    onDismiss = { menuFor = null }, onAction = { onTabAction(holder,it) })
+            } }
+        }
+    }
+    val toggleLabel = if (collapsed) "Expand workspace menu" else "Collapse workspace menu"
+    val collapseToggle: @Composable (Modifier, String) -> Unit = { modifier, glyph ->
+        Box(modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).semantics { contentDescription = toggleLabel }
+            .clickable(onClickLabel = toggleLabel, onClick = onToggleCollapsed), contentAlignment = Alignment.Center) {
+            Text(glyph, color = RailAccentDim, fontSize = 18.sp)
+        }
+    }
     Column(Modifier.fillMaxWidth().then(if (sidebar) Modifier.fillMaxHeight() else Modifier)
         .onSizeChanged { railSize = it }.background(RailSurfaceAlt)) {
-        if (sidebar) {
-            Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.padding(14.dp))
+        if (sidebar && collapsed) {
+            collapseToggle(Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), "»")
+            Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) { compactTabs() }
+            Column(Modifier.fillMaxWidth().padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                RailAction("+",onAdd,Modifier.fillMaxWidth().semantics { contentDescription = "New tab" })
+                RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
+            }
+        } else if (sidebar) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                collapseToggle(Modifier, "«")
+            }
             Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
             Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 RailAction("Connect",onConnect,Modifier.fillMaxWidth())
@@ -989,8 +1049,12 @@ private fun TabRail(
                 RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
             }
         } else {
-            Row(Modifier.fillMaxWidth().semantics { contentDescription = "Session tabs" }.horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,6.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).semantics { contentDescription = "Session tabs" }.horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,0.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
+                collapseToggle(Modifier, if (collapsed) "▾" else "▴")
+            }
+            // Collapsed on a phone: the tab row stays, the action row folds away for terminal space.
+            if (!collapsed) Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 RailAction("Connect",onConnect,Modifier.weight(1.3f))
                 RailAction("New tab",onAdd,Modifier.weight(1.2f))
                 RailAction("AI",onCopilot,Modifier.weight(.75f))
@@ -1118,6 +1182,7 @@ private fun ExtraKeysRow(
     keys: List<ExtraKey>,
     onEsc: () -> Unit,
     onTab: () -> Unit,
+    onEnter: () -> Unit,
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
     onShift: () -> Unit,
@@ -1153,6 +1218,7 @@ private fun ExtraKeysRow(
                 when (key) {
                     ExtraKeysLayouts.ESC -> KeyChip(key.label, onClick = onEsc)
                     ExtraKeysLayouts.TAB -> KeyChip(key.label, onClick = onTab)
+                    ExtraKeysLayouts.ENTER -> KeyChip(key.label, onClick = onEnter)
                     ExtraKeysLayouts.CTRL -> KeyChip(key.label, active = ctrlActive, onLongClick = onCtrlLongPress, onClick = onCtrl)
                     ExtraKeysLayouts.ALT -> KeyChip(key.label, active = altActive, onLongClick = onAltLongPress, onClick = onAlt)
                     ExtraKeysLayouts.SHIFT -> KeyChip(key.label, active = shiftActive, onClick = onShift)

@@ -73,3 +73,37 @@ LatinIME, animations off), own adb server port; no other agent's emulator was to
   or ANR.
 - NOT RUN: physical Fold7 with SwiftKey. An emulator cannot show how SwiftKey reacts to the
   keyboard restart after Tab or arrows mid-word; check that on the handset.
+
+## Follow-up the same day: history on device storage (0.6.0-rc.11)
+
+Connor: Pocket Shell holds everything inside limited app space instead of expanding into device
+storage as needed to keep its logs through normal use.
+
+| Finding | Change |
+|---|---|
+| Restored history was capped (2,000 rows in the snapshot) and scrollback beyond 20,000 rows was simply lost. | Every row that becomes scrollback is appended, exactly once, to `noBackupFiles/history/<tabId>.log` (`SessionHistory`). No line limit; it grows with device storage. The snapshot now holds only the screen rows not yet in that file (at most one screenful), so no history scan runs on the main thread at all. Find in output searches the whole file. |
+| Every column change (fold/unfold, font size, attaching a restored tab) made `TerminalBuffer.resize` allocate all 20,000 rows of every tab up front (~25 MB per tab at Fold widths), then garbage-collect the old ones. | Rows are allocated as they are used; a rebuild only creates rows that hold content. |
+| The opt-in debug transcript truncated itself at 512 KB and its queue dropped entries under load. | No size cap; unbounded queue. |
+
+How "exactly once" holds: `TerminalBuffer` emits the row that leaves the screen on each scroll.
+Keyboard resizes move rows between the screen and scrollback without scrolling, so a counter of
+"top screen rows already logged" is kept: a shrink logs the rows it pushes up (unless already
+logged), an expand marks returning rows as logged, and any write to such a row clears the mark.
+A column reflow records where unlogged content starts and, if the rebuild pushes it into
+scrollback, logs it then. The alternate screen (tmux, vim, htop) is never logged; tmux keeps its
+own history. JVM tests in `HistoryListenerTest` cover each case.
+
+History is deleted with its tab, on Clear Scrollback, and on Exit, matching restored-tab lifetime.
+After a process kill the newest `RESTORED_SCROLLBACK_LINES` (5,000) lines are replayed into live
+scrollback; replaying a long file would stall cold start, and the rest stays searchable.
+
+### Evidence for 0.6.0 (agent-prod, isolated API 35 emulator)
+
+- JVM: 226 tests, 0 failures (1 pre-existing skip), including `HistoryListenerTest` (8), history
+  tail tests (3), ENTER layout tests, and all 13 upstream `ResizeTest` cases on on-demand rows.
+- `WorkspaceControlsUiTest`: OK (3). ENTER on the special-keys row submits the typed command;
+  the menu collapses on the phone layout and on a 1600x1800/320dpi foldable layout and stays
+  collapsed after recreation; a 25,000-line session keeps rows 1 and 25,000 on device (row 1 no
+  longer in memory), each row exactly once, and closing the tab deletes the file.
+- Input, output and persistence suites: OK (32). UI suites: OK (29). Theme and connection-library
+  suites were run on hosted CI (API 34) only; on this API 35 image they fail before this change.

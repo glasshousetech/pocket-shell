@@ -15,9 +15,13 @@
   until the user explicitly reviews and saves the encrypted configuration.
   After temporarily unreadable storage recovers, a blank recovery form preserves the key,
   provider address and model together; reopen Settings to review and change them.
+- Each open tab's complete terminal history is kept on the device, in app-private storage
+  excluded from backups, so long sessions and restarts after Android stops the app lose nothing.
+  It can include sensitive output. It is deleted when the tab is closed, when Clear Scrollback
+  is used, or when Pocket Shell is exited from its notification. It is never uploaded.
 - Optional transcript logging is off by default and local-only. Logs are sampled and may
-  include sensitive output. Session history and crash records are also local; their contents
-  are not automatically uploaded. Crash records may include exception details.
+  include sensitive output. Crash records are also local; their contents are not automatically
+  uploaded. Crash records may include exception details.
 - Automatic app backup and device-transfer extraction are excluded because the Linux root
   filesystem can contain SSH keys and credentials. In-place app updates preserve local data;
   uninstalling or clearing app storage deletes it. Keep deliberate backups of important work.

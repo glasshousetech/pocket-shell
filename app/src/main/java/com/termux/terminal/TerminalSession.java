@@ -59,6 +59,8 @@ public final class TerminalSession extends TerminalOutput {
      */
     // Pocket Shell: backpressure must never block input or incoming emulation on the main looper.
     final InputQueue mTerminalToProcessIOQueue = new InputQueue(InputQueue.DEFAULT_CAPACITY);
+    /** Pocket Shell: complete-history sink, attached to the emulator when it exists. */
+    private TerminalBuffer.HistoryListener mHistoryListener;
     private ByteArrayOutputStream mInputBatch;
     private int mInputBatchDepth;
     private boolean mInputBatchRejected;
@@ -138,6 +140,7 @@ public final class TerminalSession extends TerminalOutput {
      */
     public void initializeEmulator(int columns, int rows) {
         mEmulator = new TerminalEmulator(this, columns, rows, mTranscriptRows, mClient);
+        if (mHistoryListener != null) mEmulator.setHistoryListener(mHistoryListener, 0);
 
         int[] processId = new int[1];
         mTerminalFileDescriptor = JNI.createSubprocess(mShellPath, mCwd, mArgs, mEnv, processId, rows, columns);
@@ -337,6 +340,15 @@ public final class TerminalSession extends TerminalOutput {
 
     public TerminalEmulator getEmulator() {
         return mEmulator;
+    }
+
+    /**
+     * Pocket Shell: record every row that becomes scrollback. Applied now if the emulator exists, else when it is
+     * created. {@code loggedScreenRows} top screen rows are already part of the recorded history.
+     */
+    public void setHistoryListener(TerminalBuffer.HistoryListener listener, int loggedScreenRows) {
+        mHistoryListener = listener;
+        if (mEmulator != null) mEmulator.setHistoryListener(listener, loggedScreenRows);
     }
 
     /** Notify the {@link #mClient} that the screen has changed. */
