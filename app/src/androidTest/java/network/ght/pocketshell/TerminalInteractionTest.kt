@@ -175,38 +175,42 @@ class TerminalInteractionTest {
         waitFor(session, "68 65 6c 6c 6f 7f 21")
     }
 
-    @Test fun fullKeyboardModeAsksTheImeForAnOrdinaryTextField() = terminal(receiver(1)) { view, _, _ ->
-        // Regression guard for the keyboard's missing top row. Upstream Termux declares the
-        // terminal as a password-style field, and every mainstream keyboard answers by hiding
-        // the toolbar row that carries voice typing, the clipboard and emoji — Android also
-        // refuses voice input on password fields outright.
+    @Test fun normalKeyboardIgnoresLegacyPrivateModesAndEnterActionsReachThePty() = terminal(receiver(3)) { view, _, session ->
+        val prefs = context.getSharedPreferences(PREFS_FILE, android.content.Context.MODE_PRIVATE)
+        val hadValue = prefs.contains("full_ime_features")
+        val previous = prefs.getBoolean("full_ime_features", true)
         try {
-            KeyboardPrefs.setFullImeFeatures(context, true)
-            val full = EditorInfo()
-            instrumentation.runOnMainSync { view.onCreateInputConnection(full) }
-
-            assertEquals("The terminal must present as a real text field",
-                InputType.TYPE_CLASS_TEXT, full.inputType and InputType.TYPE_MASK_CLASS)
-            assertEquals("Any password variation hides the keyboard's toolbar row",
-                0, full.inputType and InputType.TYPE_MASK_VARIATION)
-            assertTrue("Predictions and autocorrect must stay off at a prompt",
-                full.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
-            assertTrue("Enter must stay a newline key rather than a Done action key",
-                full.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
-            assertEquals("Commands must never be auto-capitalised", 0,
-                full.inputType and (InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                    InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS))
-            assertTrue("A keyboard must not learn what is typed at a prompt",
-                full.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
-
-            KeyboardPrefs.setFullImeFeatures(context, false)
-            val charBased = EditorInfo()
-            instrumentation.runOnMainSync { view.onCreateInputConnection(charBased) }
-            assertEquals("Switching the setting off restores upstream char-based input",
-                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
-                charBased.inputType)
+            for (legacy in listOf(null, false, true)) {
+                prefs.edit().apply {
+                    if (legacy == null) remove("full_ime_features") else putBoolean("full_ime_features", legacy)
+                }.commit()
+                instrumentation.runOnMainSync {
+                    val info = EditorInfo()
+                    val input = view.onCreateInputConnection(info)
+                    assertEquals(InputType.TYPE_CLASS_TEXT, info.inputType and InputType.TYPE_MASK_CLASS)
+                    assertEquals(0, info.inputType and InputType.TYPE_MASK_VARIATION)
+                    assertEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+                    assertNotEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+                    assertEquals(0, info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
+                    val caps = InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+                    assertEquals(0, info.inputType and caps)
+                    assertEquals(0, info.initialCapsMode)
+                    assertEquals(0, input.getCursorCapsMode(caps))
+                    input.closeConnection()
+                }
+            }
+            instrumentation.runOnMainSync {
+                val input = view.onCreateInputConnection(EditorInfo())
+                assertTrue(input.setComposingText("eE", 1))
+                assertTrue(input.performEditorAction(EditorInfo.IME_ACTION_DONE))
+                assertEquals("", input.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0).text.toString())
+                input.closeConnection()
+            }
+            waitFor(session, "65 45 0d")
         } finally {
-            KeyboardPrefs.setFullImeFeatures(context, true)
+            prefs.edit().apply {
+                if (hadValue) putBoolean("full_ime_features", previous) else remove("full_ime_features")
+            }.commit()
         }
     }
 

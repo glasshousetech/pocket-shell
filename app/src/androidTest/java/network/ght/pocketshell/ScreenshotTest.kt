@@ -115,7 +115,7 @@ class ScreenshotTest {
             click("Keyboard")
             visible("Customize terminal keys")
             assertTrue("Keyboard preferences must actually be visible",
-                device.wait(Until.hasObject(By.textContains("Full keyboard features enable")), 5_000))
+                device.wait(Until.hasObject(By.textContains("Your keyboard’s voice, clipboard")), 5_000))
             capture("settings_keyboard")
             device.pressBack()
             assertTrue(device.wait(Until.gone(By.text("Pocket Shell Settings")), 5_000))

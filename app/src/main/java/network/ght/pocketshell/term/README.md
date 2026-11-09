@@ -19,20 +19,15 @@ The local changes are described here and in the repository history.
 1. **Package renamed** `com.termux.view` → `network.ght.pocketshell.term` (and `.textselection`),
    so the vendored classes do not collide with the published AAR if it is ever pulled back in.
 2. **`TerminalView` is no longer `final`.**
-3. **`TerminalViewClient.shouldAllowFullImeFeatures()`** — new client callback. When it returns
-   true the terminal declares `TYPE_CLASS_TEXT | TYPE_TEXT_FLAG_NO_SUGGESTIONS` instead of the
-   upstream `TYPE_TEXT_VARIATION_VISIBLE_PASSWORD` / `TYPE_NULL`. Upstream's choice makes every
-   major keyboard (Microsoft SwiftKey, Gboard, Samsung) treat the terminal as a sensitive field
-   and drop its whole toolbar row, which is where voice typing, the clipboard and emoji live.
-   A plain text field with suggestions off keeps the row and still disables autocorrect.
-4. **`IME_FLAG_NO_PERSONALIZED_LEARNING`** is always set to ask the keyboard not to learn terminal
-   input. This is a request to the keyboard, not a guarantee about a third-party provider's behavior.
-5. **`TerminalView.refreshImeConfiguration()`** — restarts the IME connection so a change to the
-   keyboard-mode setting applies to the keyboard already on screen.
+3. **Normal keyboard contract.** Terminal input always declares CLASS_TEXT with NO_SUGGESTIONS,
+   no password variation and no NO_PERSONALIZED_LEARNING request. Obsolete saved modes are ignored.
+4. **Literal case and Enter.** A single-line IME contract and caps=0 keep SwiftKey from capitalizing
+   the first character. Editor actions finish composition and dispatch one terminal Enter.
+5. **refreshImeConfiguration().** Restarting input invalidates previous connection callbacks.
 6. **Composition preview and deletion.** Provisional speech remains local and visible; corrections
    edit that buffer before any committed-terminal deletion. Final text is committed once in bulk.
 7. **Connection generation.** Stale connections cannot deliver text after another connection,
-   tab attachment, detach or keyboard-mode change. Closing a connection discards its provisional text.
+   tab attachment, detach or input restart. Closing a connection discards its provisional text.
 8. **Nonblocking input.** Final phrases use the engine's bounded, atomic input batches. A rejected
    IME commit keeps the local draft; reviewed paste reports failure and retains its editor text.
 

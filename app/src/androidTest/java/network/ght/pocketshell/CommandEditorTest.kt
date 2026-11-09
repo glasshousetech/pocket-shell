@@ -24,19 +24,19 @@ class CommandEditorTest {
                 assertNotEquals(0, info.imeOptions and EditorInfo.IME_FLAG_NO_FULLSCREEN)
                 assertEquals(0, connection.getCursorCapsMode(caps))
                 assertNotEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, info.inputType and InputType.TYPE_MASK_VARIATION)
+                assertEquals(0, info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
                 connection.closeConnection()
             }
         }
     }
 
-    @Test fun switchingKeyboardModesPreservesExactDraftSelectionAndExplicitCase() {
+    @Test fun reconnectingKeyboardPreservesExactDraftSelectionAndExplicitCase() {
         instrumentation.runOnMainSync {
             val editor = CommandEditText(instrumentation.targetContext)
             val draft = "printf 'MiXeD café 🚀'"
             editor.setText(draft)
             editor.setSelection(8, 13)
-            for (voice in listOf(false, true, false)) {
-                editor.setVoiceMode(voice)
+            repeat(3) {
                 assertEquals(draft, editor.text.toString())
                 assertEquals(8, editor.selectionStart)
                 assertEquals(13, editor.selectionEnd)
@@ -44,8 +44,9 @@ class CommandEditorTest {
                 val info = EditorInfo()
                 val connection = editor.onCreateInputConnection(info)!!
                 assertEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE)
-                assertEquals(if (voice) InputType.TYPE_TEXT_VARIATION_NORMAL else InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                assertEquals(InputType.TYPE_TEXT_VARIATION_NORMAL,
                     info.inputType and InputType.TYPE_MASK_VARIATION)
+                assertEquals(0, info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
                 connection.closeConnection()
             }
             val connection = editor.onCreateInputConnection(EditorInfo())!!
@@ -59,7 +60,6 @@ class CommandEditorTest {
         val expected = "echo 'MiXeD café 🚀'"
         instrumentation.runOnMainSync {
             val editor = CommandEditText(instrumentation.targetContext)
-            editor.setVoiceMode(true)
             editor.setText("")
             val connection = editor.onCreateInputConnection(EditorInfo())!!
             assertTrue(connection.setComposingText("echo 'MiXeD ca", 1))

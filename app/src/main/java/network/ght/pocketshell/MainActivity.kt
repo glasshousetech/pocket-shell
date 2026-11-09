@@ -426,7 +426,6 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onDismiss = { settingsOpen = false },
             // Re-negotiate the IME contract immediately so the keyboard on screen picks the
             // new mode up, instead of only the next one the user opens.
-            onKeyboardModeChanged = { viewClient.refreshIme() },
         )
     }
 

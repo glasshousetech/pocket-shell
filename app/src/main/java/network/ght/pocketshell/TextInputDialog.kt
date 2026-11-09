@@ -11,7 +11,6 @@ import android.view.inputmethod.InputMethodManager
 import android.util.TypedValue
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -27,7 +26,6 @@ fun TextInputDialog(
     onInsert: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var voiceMode by rememberSaveable { mutableStateOf(false) }
     val latestChange by rememberUpdatedState(onValueChange)
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f).toArgb()
@@ -49,27 +47,15 @@ fun TextInputDialog(
                 Column(Modifier.heightIn(max = maxHeight).padding(horizontal = 12.dp, vertical = 4.dp)) {
                     // Keep actions above the editor and keyboard, including landscape.
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (compact) {
-                            FilterChip(selected = !voiceMode, onClick = { voiceMode = false }, label = { Text("Code typing") })
-                            Spacer(Modifier.width(8.dp))
-                            FilterChip(selected = voiceMode, onClick = { voiceMode = true }, label = { Text("Voice typing") })
-                            Spacer(Modifier.weight(1f))
-                        } else {
-                            Text("Text / voice", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        }
+                        Text("Text / voice", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                         TextButton(onClick = onDismiss) { Text("Close") }
                         TextButton(onClick = onInsert, enabled = TerminalInteraction.reviewedText(value).isNotBlank()) { Text("Insert") }
                     }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                         maxLines = if (compact) 2 else 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
-                    if (!compact) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = !voiceMode, onClick = { voiceMode = false }, label = { Text("Code typing") })
-                        FilterChip(selected = voiceMode, onClick = { voiceMode = true }, label = { Text("Voice typing") })
-                    }
                     if (!compact) {
-                        Text(if (voiceMode) "Use your keyboard’s microphone or composed input. Review the text before inserting."
-                            else "Literal keys without automatic corrections. Insert prepares the command; Enter runs it.",
-                            style = MaterialTheme.typography.bodySmall)
+                        Text("Type, paste or use your keyboard’s microphone. Review the command: Insert prepares it; Enter runs it.",
+                             style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(8.dp))
                     }
                     Column(Modifier.fillMaxWidth().weight(1f, fill = false)
@@ -81,7 +67,6 @@ fun TextInputDialog(
                             modifier = Modifier.fillMaxWidth(),
                             factory = { context ->
                                 CommandEditText(context).apply {
-                                    setVoiceMode(voiceMode)
                                     contentDescription = "Command text"
                                     background = null
                                     setPadding(0, 0, 0, 0)
@@ -103,7 +88,6 @@ fun TextInputDialog(
                                 }
                             },
                             update = { editor ->
-                                editor.setVoiceMode(voiceMode)
                                 editor.minLines = if (compact) 1 else 2
                                 editor.maxLines = if (compact) 2 else 5
                                 editor.setTextColor(textColor)

@@ -1,3 +1,23 @@
+# Normal keyboard input — rc.9 repair
+
+## Accepted behavior, 2026-11-08
+Connor explicitly requested no app-forced incognito keyboard, for existing users and everyone installing the app. Terminal and Text / voice use ordinary text input, including when the obsolete full_ime_features preference is absent, false or true. There is no private-keyboard toggle. Credential fields remain credential fields.
+
+Keep automatic capitalization and command correction disabled. Preserve explicit case, Unicode, composition, backspace, Enter, reviewed insertion, draft/cursor state, tab isolation and existing saved data. Verify the current signed candidate on the server emulator and the actual Fold. Do not publish a stable release under this candidate scope.
+
+## Root cause and change
+The terminal unconditionally requested IME_FLAG_NO_PERSONALIZED_LEARNING. The legacy literal mode and reviewed code editor also used a visible-password variation. Both requests are removed from command entry. The old preference is ignored without clearing unrelated settings. A single-line keyboard contract plus explicit caps=0 prevents the SwiftKey first-letter capitalization reproduced during rc.8 acceptance. Editor action keys deliver composition followed by one terminal Enter.
+
+## Verification map
+Applicable checklist families: MAP01/03/05; UX04/06/07; A11Y01/05; FLOW02/04; DATA01/03; AUTH05; PERF01/03/04/05; REC03/06/07; PLAT02/03/05; PROOF01–06. Use the existing full native suite plus signed upgrade checks, real SwiftKey UI on the representative Fold emulator, and an owned handset display. Assertions cover missing/false/true legacy preference, exact draft/selection, no forced incognito, case/composition/deletion/Enter, keyboard return, portrait/landscape, real PTY bulk-input latency and diagnostic retrieval without typed content. Unrelated account/payment/web families are N/A to this bounded input repair; this does not close historical product findings.
+
+Status: implementation prepared; final-revision runtime tests NOT RUN. Evidence will be recorded here after execution. The representative emulator is not a Samsung firmware or private-data clone. Phone UI verification must use an owned lease. Previous CPU measurements do not prove input latency.
+
+Sources: [Android EditorInfo](https://developer.android.com/reference/android/view/inputmethod/EditorInfo#IME_FLAG_NO_PERSONALIZED_LEARNING), [Microsoft SwiftKey incognito](https://support.microsoft.com/en-us/swiftkey-keyboard/how-does-incognito-mode-work-on-your-microsoft-swiftkey-keyboard).
+
+## Historical investigation (superseded behavior)
+The following September investigation explains the original workaround; its privacy flag and mode toggle are superseded by the accepted rc.9 behavior above.
+
 # The keyboard's top row in the terminal — September 28, 2026
 
 ## Report
