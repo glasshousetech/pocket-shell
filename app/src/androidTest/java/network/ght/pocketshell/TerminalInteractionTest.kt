@@ -214,7 +214,32 @@ class TerminalInteractionTest {
         }
     }
 
-    @Test fun backspaceKeyEventsEditCompositionBeforeTerminal() = terminal(receiver(3)) { view, client, session ->
+    private fun editorText(input: android.view.inputmethod.InputConnection) =
+        input.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0).text.toString()
+
+    @Test fun typedLettersReachTheShellBeforeTheKeyboardCommitsTheWord() = terminal(receiver(2)) { view, _, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            // SwiftKey and dictation compose a word; the shell must see each letter immediately.
+            assertTrue(input.setComposingText("l", 1))
+            assertTrue(input.setComposingText("ls", 1))
+        }
+        waitFor(session, "6c 73")
+    }
+
+    @Test fun tabMidWordSendsTheWordFirstAndStartsAFreshKeyboardWord() = terminal(receiver(4)) { view, client, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            input.setComposingText("Do", 1)
+            assertTrue(client.sendKey(KeyEvent.KEYCODE_TAB))
+            // The old word is closed: a late correction from it can no longer reach the shell.
+            assertFalse(input.setComposingText("Dox", 1))
+            assertTrue(view.onCreateInputConnection(EditorInfo()).commitText("x", 1))
+        }
+        waitFor(session, "44 6f 09 78")
+    }
+
+    @Test fun backspaceKeyEventsCorrectTheWordAlreadyInTheShell() = terminal(receiver(10)) { view, _, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
             input.setComposingText("ab🚀", 1)
@@ -223,15 +248,15 @@ class TerminalInteractionTest {
                 assertTrue(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL)))
             }
             backspace()
-            assertEquals("One backspace removes one provisional code point", "ab", client.composingText)
+            assertEquals("One backspace removes one code point", "ab", editorText(input))
             backspace()
-            assertEquals("The next backspace also takes effect immediately", "a", client.composingText)
+            assertEquals("The next backspace also takes effect immediately", "a", editorText(input))
             input.commitText("a", 1)
             backspace()
             input.commitText("z", 1)
         }
-        // Provisional edits must not delete remote input; after commit exactly one DEL is sent.
-        waitFor(session, "61 7f 7a")
+        // Each keyboard deletion is exactly one DEL; committing the same word sends nothing again.
+        waitFor(session, "61 62 f0 9f 9a 80 7f 7f 7f 7a")
     }
 
     @Test fun rapidBackspacesDeliverOneDeletePerRequest() = terminal(receiver(7)) { view, _, session ->
@@ -247,51 +272,53 @@ class TerminalInteractionTest {
         waitFor(session, "61 62 63 7f 7f 7f 7a")
     }
 
-    @Test fun imeDeleteKeysHonorSelectionAndForwardDeletion() = terminal(receiver(1)) { view, client, session ->
+    @Test fun imeDeleteKeysHonorSelectionAndForwardDeletion() = terminal(receiver(11)) { view, _, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
             input.setComposingText("abcd", 1)
             assertTrue(input.setSelection(1, 3))
             input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
             input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
-            assertEquals("ad", client.composingText)
+            assertEquals("ad", editorText(input))
             assertTrue(input.setSelection(0, 0))
             input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL))
             input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_FORWARD_DEL))
-            assertEquals("d", client.composingText)
+            assertEquals("d", editorText(input))
             input.commitText("d", 1)
         }
-        waitFor(session, "64")
+        // The shell's line is rewritten from the first changed character: abcd -> ad -> d.
+        waitFor(session, "61 62 63 64 7f 7f 7f 64 7f 7f 64")
     }
 
-    @Test fun provisionalVoiceTextIsVisibleAndCommittedExactlyOnce() = terminal(receiver(6)) { view, client, session ->
+    @Test fun dictationCorrectionsReachTheShellAsDeletesAndCommitOnce() = terminal(receiver(8)) { view, _, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
             input.beginBatchEdit()
+            input.setComposingText("hel", 1)
             input.setComposingText("hello!", 1)
             input.endBatchEdit()
-            assertEquals("hello!", client.composingText)
+            assertEquals("hello!", editorText(input))
             input.deleteSurroundingText(1, 0)
-            assertEquals("hello", client.composingText)
+            assertEquals("hello", editorText(input))
             input.commitText("hello!", 1)
             input.finishComposingText()
-            assertEquals("", client.composingText)
+            assertEquals("", editorText(input))
         }
-        // If provisional deletion leaked to the shell, or composition was sent twice, this differs.
-        waitFor(session, "68 65 6c 6c 6f 21")
+        // One diff per batch, one DEL per correction, nothing re-sent by commit or finish.
+        waitFor(session, "68 65 6c 6c 6f 21 7f 21")
     }
 
-    @Test fun staleImeCannotDeliverTextAfterConnectionReplacement() = terminal(receiver(3)) { view, client, session ->
+    @Test fun staleImeCannotDeliverTextAfterConnectionReplacement() = terminal(receiver(3)) { view, _, session ->
         instrumentation.runOnMainSync {
             val stale = view.onCreateInputConnection(EditorInfo())
-            stale.setComposingText("DO_NOT_SEND", 1)
             val current = view.onCreateInputConnection(EditorInfo())
+            assertFalse(stale.setComposingText("DO_NOT_SEND", 1))
             assertFalse(stale.commitText("DO_NOT_SEND", 1))
             assertFalse(stale.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL)))
             assertFalse(stale.deleteSurroundingText(1, 0))
             stale.closeConnection()
             current.setComposingText("ok", 1)
-            assertEquals("ok", client.composingText)
+            assertEquals("ok", editorText(current))
             current.commitText("ok!", 1)
         }
         waitFor(session, "6f 6b 21")
@@ -324,7 +351,6 @@ class TerminalInteractionTest {
             assertFalse(input.commitText(oversized, 1))
             val extracted = input.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
             assertEquals(oversized.length, extracted.text.length)
-            assertTrue(client.composingText.isNotEmpty())
             assertFalse(session.tryPaste(oversized))
             input.closeConnection()
             assertFalse(input.commitText("NO", 1))
@@ -334,16 +360,67 @@ class TerminalInteractionTest {
         waitFor(session, "6f 6b 21")
     }
 
-    @Test fun keyboardModeChangeInvalidatesOldDictation() = terminal(receiver(3)) { view, client, session ->
+    @Test fun imeRestartInvalidatesTheOldConnection() = terminal(receiver(5)) { view, _, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
-            input.setComposingText("DO_NOT_SEND", 1)
+            input.setComposingText("ab", 1)
             view.refreshImeConfiguration()
-            assertEquals("", client.composingText)
             assertFalse(input.finishComposingText())
+            assertFalse(input.setComposingText("abX", 1))
             assertFalse(input.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)))
             assertTrue(view.onCreateInputConnection(EditorInfo()).commitText("ok!", 1))
         }
-        waitFor(session, "6f 6b 21")
+        // Typed text already reached the shell; nothing from the old connection follows it.
+        waitFor(session, "61 62 6f 6b 21")
+    }
+
+    /** Regression: switching tabs left the keyboard bound to a dead connection, dropping every key. */
+    @Test fun attachingAnotherSessionRebindsTheKeyboard() {
+        lateinit var view: TerminalView
+        lateinit var first: TerminalSession
+        lateinit var second: TerminalSession
+        val connections = java.util.concurrent.atomic.AtomicInteger()
+        val activity = ActivityScenario.launch<android.app.Activity>(Intent().setClassName(context, "network.ght.pocketshell.TerminalTestActivity"))
+        fun shell(name: String) = TerminalSession("/system/bin/sh", context.filesDir.absolutePath,
+            arrayOf("/system/bin/sh", "-c", "printf '${name}_READY\\r\\n'; sleep 30"),
+            arrayOf("PATH=/system/bin", "TERM=xterm-256color"), 20000, RailSessionClient({}, {}, {}))
+        activity.onActivity { host ->
+            first = shell("FIRST"); second = shell("SECOND")
+            val client = RailViewClient(host, 20)
+            view = object : TerminalView(host, null) {
+                override fun onCreateInputConnection(outAttrs: EditorInfo): android.view.inputmethod.InputConnection =
+                    super.onCreateInputConnection(outAttrs).also { connections.incrementAndGet() }
+            }.apply {
+                setTerminalViewClient(client); client.view = this
+                setTextSize(20); isFocusable = true; isFocusableInTouchMode = true
+                attachSession(first)
+            }
+            host.setContentView(view)
+            view.requestFocus()
+            client.showKeyboard()
+        }
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            fun waitUntil(message: String, condition: () -> Boolean) {
+                val deadline = System.currentTimeMillis() + 6000
+                var ok = false
+                while (!ok && System.currentTimeMillis() < deadline) {
+                    instrumentation.runOnMainSync { ok = condition() }
+                    if (!ok) Thread.sleep(30)
+                }
+                assertTrue(message, ok)
+            }
+            waitUntil("Terminal must be the connected IME editor") {
+                view.hasWindowFocus() && view.hasFocus() && imm.isActive(view) && connections.get() > 0
+            }
+            val before = connections.get()
+            instrumentation.runOnMainSync { assertTrue(view.attachSession(second)) }
+            waitUntil("Attaching another session must bind a fresh keyboard connection") {
+                connections.get() > before && imm.isActive(view)
+            }
+        } finally {
+            instrumentation.runOnMainSync { first.finishIfRunning(); second.finishIfRunning() }
+            activity.close()
+        }
     }
 }

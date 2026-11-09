@@ -18,6 +18,7 @@ object TerminalInteraction {
             if (modifiers and KeyHandler.KEYMOD_SHIFT != 0) parameter += 1
             if (modifiers and KeyHandler.KEYMOD_ALT != 0) parameter += 2
             if (modifiers and KeyHandler.KEYMOD_CTRL != 0) parameter += 4
+            view.closeImeWord()
             session.write(if (parameter == 1) "\u001b[${page}~" else "\u001b[$page;${parameter}~")
             return true
         }

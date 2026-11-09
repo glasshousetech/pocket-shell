@@ -41,7 +41,18 @@ public final class TerminalSession extends TerminalOutput {
      * A queue written to from a separate thread when the process outputs, and read by main thread to process by
      * terminal emulator.
      */
-    final ByteQueue mProcessToTerminalIOQueue = new ByteQueue(4096);
+    /**
+     * Pocket Shell: 64 KiB instead of upstream's 4 KiB, so the reader thread can keep pulling from
+     * the PTY while the main thread renders, and a burst arrives in one drain rather than dozens.
+     */
+    final ByteQueue mProcessToTerminalIOQueue = new ByteQueue(64 * 1024);
+    /** Pocket Shell: at most one queued output wakeup; the main thread drains everything available. */
+    final java.util.concurrent.atomic.AtomicBoolean mOutputWakeupPending = new java.util.concurrent.atomic.AtomicBoolean();
+    /**
+     * Pocket Shell: longest the main thread spends appending output before yielding to touch,
+     * keyboard and drawing work. The rest is drained on the next message-loop turn.
+     */
+    private static final long OUTPUT_DRAIN_BUDGET_NANOS = 8_000_000L;
     /**
      * A queue written to from the main thread due to user interaction, and read by another thread which forwards by
      * writing to the {@link #mTerminalFileDescriptor}.
@@ -184,7 +195,10 @@ public final class TerminalSession extends TerminalOutput {
                             throw failure;
                         }
                         if (read <= 0 || !mProcessToTerminalIOQueue.write(buffer, 0, read)) break;
-                        mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
+                        // Pocket Shell: upstream posted one message per read, each redrawing the
+                        // screen for at most 4 KiB. Post only when no wakeup is already queued.
+                        if (mOutputWakeupPending.compareAndSet(false, true))
+                            mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
                     }
                 } catch (Exception failure) {
                     mClient.logWarn(LOG_TAG, "Terminal output read failed: " + failure.getMessage());
@@ -444,7 +458,7 @@ public final class TerminalSession extends TerminalOutput {
     @SuppressLint("HandlerLeak")
     class MainThreadHandler extends Handler {
 
-        final byte[] mReceiveBuffer = new byte[4 * 1024];
+        final byte[] mReceiveBuffer = new byte[16 * 1024];
         private boolean processExited;
         private boolean outputDrained;
         private int pendingExitCode;
@@ -452,11 +466,22 @@ public final class TerminalSession extends TerminalOutput {
         @Override
         public void handleMessage(Message msg) {
             if (mShellPid == -1) return;
-            int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
-            if (bytesRead > 0) {
+            // Clear before draining: output written after this point posts a fresh wakeup.
+            if (msg.what == MSG_NEW_INPUT) mOutputWakeupPending.set(false);
+            int bytesRead;
+            boolean appended = false;
+            final long deadline = System.nanoTime() + OUTPUT_DRAIN_BUDGET_NANOS;
+            while ((bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false)) > 0) {
                 mEmulator.append(mReceiveBuffer, bytesRead);
-                notifyScreenUpdate();
+                appended = true;
+                if (System.nanoTime() >= deadline) {
+                    // Yield so input and frames are not starved by a flood of output.
+                    if (mOutputWakeupPending.compareAndSet(false, true)) sendEmptyMessage(MSG_NEW_INPUT);
+                    break;
+                }
             }
+            // One screen update per drain instead of one per 4 KiB chunk.
+            if (appended) notifyScreenUpdate();
 
             if (msg.what == MSG_PROCESS_EXITED) {
                 processExited = true;

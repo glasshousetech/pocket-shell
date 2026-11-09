@@ -787,16 +787,6 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
           }
         }
 
-        if (viewClient.composingText.isNotEmpty()) {
-            Text(
-                text = "Composing: ${viewClient.composingText}",
-                modifier = Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 8.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
         Row(
             Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),

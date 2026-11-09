@@ -224,6 +224,11 @@ class TermService : Service() {
     /** Activity registers this to repaint the visible TerminalView on screen changes. */
     var onRedraw: ((TerminalSession) -> Unit)? = null
 
+    // Snapshot history is read from the main-thread-owned emulator. Re-read only tabs whose
+    // screen changed since the last capture; idle tabs reuse their previous capture.
+    private val historyDirty = HashSet<Int>()
+    private val historyCache = HashMap<Int, String>()
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     private val snapshotHandler = Handler(Looper.getMainLooper())
@@ -319,7 +324,7 @@ class TermService : Service() {
             mode,
             startupCommand = command,
             tabId = tabId,
-            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, mode, s) },
+            onRedraw = { s -> onRedraw?.invoke(s); historyDirty.add(id); TranscriptLogger.onRedraw(this, id, mode, s) },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { s -> alive.value = false; DiagnosticLog.record(this, "session", "process_exit", tabId = tabId, exitCode = s.exitStatus); refreshNotification() },
         )
@@ -350,6 +355,7 @@ class TermService : Service() {
             if (selectedSessionId.value == holder.id) selectedSessionId.value = replacement.id
             if (reviewedTextTarget.value == holder.id) reviewedTextTarget.value = replacement.id
             TranscriptLogger.reset(holder.id)
+            forgetHistory(holder.id)
             persistSnapshot()
             DiagnosticLog.record(this, "session", "reconnect_started", tabId = holder.tabId)
             replacement
@@ -418,6 +424,7 @@ class TermService : Service() {
             selectedSessionId.value = sessions.getOrNull(previousIndex.coerceAtMost(sessions.lastIndex))?.id
         }
         TranscriptLogger.reset(holder.id)
+        forgetHistory(holder.id)
         // The UI always keeps at least one session open, so we don't self-stop here;
         // the user exits explicitly via the notification's Exit action.
         refreshNotification()
@@ -471,7 +478,7 @@ class TermService : Service() {
             cwd = entry.cwd,
             startupCommand = resumeCommand,
             tabId = tabId,
-            onRedraw = { s -> onRedraw?.invoke(s); TranscriptLogger.onRedraw(this, id, entry.mode, s) },
+            onRedraw = { s -> onRedraw?.invoke(s); historyDirty.add(id); TranscriptLogger.onRedraw(this, id, entry.mode, s) },
             onTitle = { s -> s.title?.takeIf { it.isNotBlank() }?.let { label.value = it } },
             onFinished = { s -> alive.value = false; DiagnosticLog.record(this, "session", "process_exit", tabId = tabId, exitCode = s.exitStatus); refreshNotification() },
         )
@@ -502,7 +509,8 @@ class TermService : Service() {
         // transcriptText only ever contains rendered characters (no escape codes),
         // but it joins rows with bare '\n'; the emulator needs '\r\n' to actually
         // return to column 0, or replayed lines drift diagonally across the screen.
-        val normalized = transcript.replace("\r\n", "\n").replace("\n", "\r\n")
+        // Older builds saved all 20,000 rows; replaying that on the main thread stalled cold start.
+        val normalized = TerminalSnapshot.lastLines(transcript, PERSISTED_HISTORY_ROWS).replace("\r\n", "\n").replace("\n", "\r\n")
         val marker = "[2m── session restored (best-effort history — not a live process) ──[0m\r\n\r\n"
         val text = "$normalized\r\n$marker" + (notice?.let { it + "\r\n" } ?: "")
         val bytes = text.toByteArray(Charsets.UTF_8)
@@ -529,12 +537,29 @@ class TermService : Service() {
                 } else {
                     null // proot's own -w /root always wins; host cwd isn't meaningful.
                 },
-                transcript = runCatching {
-                    holder.session.emulator?.screen?.transcriptText.orEmpty()
-                }.getOrNull().orEmpty(),
+                transcript = historyFor(holder),
             )
         }
         SessionStore.save(this, snap)
+    }
+
+    /**
+     * The tab's recent history for the snapshot. Capture scans emulator rows on the main thread,
+     * so it is bounded to [PERSISTED_HISTORY_ROWS] and repeated only after the screen changed.
+     */
+    private fun historyFor(holder: TermSession): String {
+        if (holder.id !in historyDirty) historyCache[holder.id]?.let { return it }
+        val text = runCatching {
+            TerminalSnapshot.tail(holder.session, maxChars = Int.MAX_VALUE, maxRows = PERSISTED_HISTORY_ROWS)
+        }.getOrNull().orEmpty()
+        historyCache[holder.id] = text
+        historyDirty.remove(holder.id)
+        return text
+    }
+
+    private fun forgetHistory(id: Int) {
+        historyDirty.remove(id)
+        historyCache.remove(id)
     }
 
     /** Recents-swipe often precedes the process actually being killed — snapshot now. */
@@ -552,6 +577,8 @@ class TermService : Service() {
         sessions.forEach { runCatching { it.session.finishIfRunning() } }
         sessions.forEach { TranscriptLogger.reset(it.id) }
         sessions.clear()
+        historyDirty.clear()
+        historyCache.clear()
         releaseWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -657,6 +684,13 @@ class TermService : Service() {
 
         /** Safety-net cadence; structural changes (new/close tab) also save immediately. */
         private const val SNAPSHOT_INTERVAL_MS = 20_000L
+
+        /**
+         * Rows of history kept per tab across a full process kill. Capturing them runs on the main
+         * thread, so this bounds a periodic main-thread scan (2,000 rows takes a few ms; all 20,000
+         * stalled typing). Raise it if more restored history matters more than that cost.
+         */
+        internal const val PERSISTED_HISTORY_ROWS = 2_000
 
         /** Initial emulator size for a restored session; the real TerminalView resizes it. */
         private const val DEFAULT_COLUMNS = 80

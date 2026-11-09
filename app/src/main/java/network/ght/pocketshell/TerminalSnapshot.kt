@@ -2,11 +2,22 @@ package network.ght.pocketshell
 
 import com.termux.terminal.TerminalSession
 
-/** Main-thread only. Never materialize 20,000 rows to retain an 8-KB tail. */
+/** Main-thread only. Never materialize 20,000 rows to retain a tail. */
 internal object TerminalSnapshot {
-    fun tail(session: TerminalSession, maxChars: Int = 8000): String {
+    /** The last [rows] lines of [text], found by scanning backwards instead of splitting it all. */
+    fun lastLines(text: String, rows: Int): String {
+        var index = text.length
+        repeat(rows) {
+            if (index == 0) return text
+            index = text.lastIndexOf('\n', index - 1)
+            if (index < 0) return text
+        }
+        return text.substring(index + 1)
+    }
+
+    fun tail(session: TerminalSession, maxChars: Int = 8000, maxRows: Int = 128): String {
         val emulator = session.emulator ?: return ""
-        val firstRow = maxOf(-emulator.screen.activeTranscriptRows, emulator.mRows - 128)
+        val firstRow = maxOf(-emulator.screen.activeTranscriptRows, emulator.mRows - maxRows)
         val text = emulator.screen.getSelectedText(0, firstRow, emulator.mColumns, emulator.mRows - 1)
         if (text.length <= maxChars) return text
         val tail = text.takeLast(maxChars)

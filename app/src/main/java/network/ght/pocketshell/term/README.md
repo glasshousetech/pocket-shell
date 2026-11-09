@@ -24,12 +24,22 @@ The local changes are described here and in the repository history.
 4. **Literal case and Enter.** A single-line IME contract and caps=0 keep SwiftKey from capitalizing
    the first character. Editor actions finish composition and dispatch one terminal Enter.
 5. **refreshImeConfiguration().** Restarting input invalidates previous connection callbacks.
-6. **Composition preview and deletion.** Provisional speech remains local and visible; corrections
-   edit that buffer before any committed-terminal deletion. Final text is committed once in bulk.
+6. **Immediate keyboard delivery (2026-11-09).** `ImeConnection` mirrors the keyboard's word in
+   progress to the PTY as it changes: each edit sends one DEL per code point after the common
+   prefix, then the new remainder, so typing appears at the prompt immediately and corrections
+   arrive as DEL keys. Edits inside an IME batch are sent as one difference. Fully committed text
+   empties the local editable. A non-keyboard key (Tab, arrows, Esc, Enter, extra keys, hardware
+   keys, a one-shot modifier) flushes the word and restarts the keyboard, so a later correction
+   cannot reach across it. This replaces the earlier local "Composing:" preview, which held every
+   letter until the word was committed and resized the terminal twice per word.
 7. **Connection generation.** Stale connections cannot deliver text after another connection,
-   tab attachment, detach or input restart. Closing a connection discards its provisional text.
+   tab attachment, detach or input restart. `attachSession()` also restarts input when the view
+   has focus; without that the keyboard stayed bound to the previous session's dead connection
+   and every keystroke was dropped after a tab switch, new tab or Connect.
 8. **Nonblocking input.** Final phrases use the engine's bounded, atomic input batches. A rejected
    IME commit keeps the local draft; reviewed paste reports failure and retains its editor text.
+9. **Coalesced accessibility text.** With any accessibility service enabled, the visible screen
+   text is refreshed at most every 100 ms and only when it changed, not once per output chunk.
 
 ## Updating
 

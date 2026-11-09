@@ -30,6 +30,11 @@ object SessionStore {
     private const val FILE_NAME = "sessions_snapshot.json"
     private const val VERSION = 3
 
+    // Writer-thread state. Identical periodic snapshots are not rewritten, and an existing
+    // file's version is verified once per process instead of re-parsing it before every save.
+    private var lastWritten: List<Saved>? = null
+    private var existingVersionVerified = false
+
     data class Saved(
         val mode: SessionMode,
         val title: String,
@@ -58,11 +63,13 @@ object SessionStore {
             clearOnWriter(context)
             return
         }
+        if (sessions == lastWritten && file(context).exists()) return
         runCatching {
-            if (file(context).exists()) {
+            if (!existingVersionVerified && file(context).exists()) {
                 val previous = JSONObject(AtomicFile(file(context)).openRead().bufferedReader().use { it.readText() })
                 require(previous.optInt("version", 1) in 1..VERSION) { "Unsupported snapshot version; existing history was kept." }
             }
+            existingVersionVerified = true
             val arr = JSONArray()
             sessions.forEach { s ->
                 val o = JSONObject()
@@ -89,6 +96,7 @@ object SessionStore {
             try {
                 stream.write(root.toString().toByteArray(Charsets.UTF_8))
                 atomic.finishWrite(stream)
+                lastWritten = sessions
             } catch (e: Exception) {
                 atomic.failWrite(stream)
                 throw e
@@ -159,6 +167,7 @@ object SessionStore {
     }
 
     private fun clearOnWriter(context: Context) {
+        lastWritten = null
         AtomicFile(file(context)).delete()
         runCatching { File(file(context).parentFile, "$FILE_NAME.tmp").delete() }
     }

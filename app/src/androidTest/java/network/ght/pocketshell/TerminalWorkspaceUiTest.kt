@@ -127,10 +127,18 @@ class TerminalWorkspaceUiTest {
                         return null
                     }
                     voiceInput = terminal(host.window.decorView)!!.onCreateInputConnection(android.view.inputmethod.EditorInfo())
-                    voiceInput.setComposingText("Voice preview stays local until the keyboard commits it", 1)
+                    voiceInput.setComposingText("echo TYPED_LIVE", 1)
                 }
-                assertTrue("Provisional speech is visible before commit",
-                    device.wait(Until.hasObject(By.textStartsWith("Composing: Voice preview")), 4000))
+                // Typing appears at the shell prompt as it happens, before the keyboard commits
+                // the word, and no separate preview bar resizes the terminal.
+                val typedDeadline = System.currentTimeMillis() + 4000
+                var typedLive = false
+                while (!typedLive && System.currentTimeMillis() < typedDeadline) {
+                    instrumentation.runOnMainSync { typedLive = fixture.session.emulator.screen.transcriptText.contains("> echo TYPED_LIVE") }
+                    if (!typedLive) Thread.sleep(30)
+                }
+                assertTrue("Uncommitted keyboard text reaches the shell immediately", typedLive)
+                assertFalse(device.hasObject(By.textStartsWith("Composing:")))
                 // Accessibility nodes can arrive before the compositor presents the frame.
                 // Do not archive a black transitional surface as visual evidence.
                 device.waitForIdle()
@@ -140,11 +148,14 @@ class TerminalWorkspaceUiTest {
                         host.window.decorView.postOnAnimation { drawn.countDown() }
                     }
                 }
-                assertTrue("Preview frame presented", drawn.await(2, java.util.concurrent.TimeUnit.SECONDS))
-                assertTrue(device.takeScreenshot(File(dir, "voice-composition-preview.png")))
+                assertTrue("Typed frame presented", drawn.await(2, java.util.concurrent.TimeUnit.SECONDS))
+                assertTrue(device.takeScreenshot(File(dir, "keyboard-typing-live.png")))
                 instrumentation.runOnMainSync {
-                    assertFalse(fixture.session.emulator.screen.transcriptText.contains("Voice preview"))
+                    // The keyboard finishing the word sends nothing twice; clear the fixture line.
+                    assertTrue(voiceInput.finishComposingText())
+                    assertEquals(1, Regex("TYPED_LIVE").findAll(fixture.session.emulator.screen.transcriptText).count())
                     voiceInput.closeConnection()
+                    fixture.session.write("\u0015")
                 }
                 // Close the terminal keyboard for a full-height workspace preview.
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }

@@ -64,10 +64,6 @@ class RailViewClient(
     var altDown by mutableStateOf(false)
     var shiftDown by mutableStateOf(false)
     var fnDown by mutableStateOf(false)
-    var composingText by mutableStateOf("")
-        private set
-
-    override fun onImeCompositionChanged(text: String) { composingText = text }
 
     override fun onTextInput(text: CharSequence, session: TerminalSession): Boolean {
         if (ctrlDown || altDown || shiftDown || fnDown) return false
