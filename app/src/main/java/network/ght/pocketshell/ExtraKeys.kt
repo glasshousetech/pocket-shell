@@ -39,10 +39,11 @@ object ExtraKeysLayouts {
     val PGUP = ExtraKey("pgup", "PGUP")
     val PGDN = ExtraKey("pgdn", "PGDN")
     val DEL = ExtraKey("del", "DEL")
+    val ENTER = ExtraKey("enter", "ENTER")
 
     /** Every key that can appear in the row, in default order. */
     val ALL: List<ExtraKey> = listOf(
-        ESC, TAB, CTRL, ALT, SHIFT,
+        ESC, TAB, ENTER, CTRL, ALT, SHIFT,
         LEFT, DOWN, UP, RIGHT,
         HOME, END, PGUP, PGDN, DEL,
         ExtraKey("dash", "-", '-'),
@@ -66,15 +67,15 @@ object ExtraKeysLayouts {
 
     /** Just the essentials — ESC/TAB, modifiers, arrows. */
     val MINIMAL = Preset(
-        "minimal", "Minimal", "ESC, TAB, CTRL, ALT, SHIFT, and arrows only.",
-        listOf(ESC, TAB, CTRL, ALT, SHIFT, LEFT, DOWN, UP, RIGHT),
+        "minimal", "Minimal", "ESC, TAB, ENTER, CTRL, ALT, SHIFT, and arrows only.",
+        listOf(ESC, TAB, ENTER, CTRL, ALT, SHIFT, LEFT, DOWN, UP, RIGHT),
     )
 
     /** Tuned for ssh + tmux: scrollback paging and the keys remote shells lean on. */
     val SSH_TMUX = Preset(
         "ssh_tmux", "SSH & tmux", "Nav + paging, pipe, tilde, dash, slash.",
         listOf(
-            ESC, TAB, CTRL, ALT, SHIFT,
+            ESC, TAB, ENTER, CTRL, ALT, SHIFT,
             LEFT, DOWN, UP, RIGHT,
             PGUP, PGDN,
             ALL.first { it.id == "pipe" },
@@ -89,6 +90,7 @@ object ExtraKeysLayouts {
     private const val PREFS = "pocketshell_prefs"
     private const val KEY_PRESET = "extra_keys_preset"
     private const val KEY_CUSTOM = "extra_keys_custom"
+    private const val KEY_ENTER_ADDED = "extra_keys_enter_added"
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -98,7 +100,13 @@ object ExtraKeysLayouts {
      */
     fun saved(context: Context): List<ExtraKey> {
         val p = prefs(context)
-        decode(p.getString(KEY_CUSTOM, null))?.let { return it }
+        decode(p.getString(KEY_CUSTOM, null))?.let { custom ->
+            // ENTER arrived after rows could be customized. Add it once, next to TAB; removing it later sticks.
+            if (p.getBoolean(KEY_ENTER_ADDED, false)) return custom
+            val upgraded = withEnter(custom)
+            p.edit().putString(KEY_CUSTOM, encode(upgraded)).putBoolean(KEY_ENTER_ADDED, true).apply()
+            return upgraded
+        }
         val preset = PRESETS.firstOrNull { it.id == p.getString(KEY_PRESET, DEFAULT.id) } ?: DEFAULT
         return preset.keys
     }
@@ -113,7 +121,14 @@ object ExtraKeysLayouts {
 
     /** Persists a user-reordered/toggled row. */
     fun saveCustom(context: Context, keys: List<ExtraKey>) {
-        prefs(context).edit().putString(KEY_CUSTOM, encode(keys)).apply()
+        prefs(context).edit().putString(KEY_CUSTOM, encode(keys)).putBoolean(KEY_ENTER_ADDED, true).apply()
+    }
+
+    /** [keys] with ENTER after TAB (or after ESC, else first) unless it is already there. */
+    internal fun withEnter(keys: List<ExtraKey>): List<ExtraKey> {
+        if (ENTER in keys) return keys
+        val anchor = keys.indexOf(TAB).takeIf { it >= 0 } ?: keys.indexOf(ESC)
+        return keys.toMutableList().apply { add(anchor + 1, ENTER) }
     }
 
     /** True when [keys] is exactly a preset's row (used to show the ✓). */

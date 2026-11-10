@@ -329,6 +329,20 @@ public final class TerminalEmulator {
         return mScreen;
     }
 
+    /** Pocket Shell: the normal (non-alternate) screen, whose rows become scrollback. */
+    public TerminalBuffer getMainScreen() {
+        return mMainBuffer;
+    }
+
+    /**
+     * Pocket Shell: deliver every row that becomes scrollback on the normal screen to {@code listener}.
+     *
+     * @param loggedScreenRows top screen rows the listener's history already contains.
+     */
+    public void setHistoryListener(TerminalBuffer.HistoryListener listener, int loggedScreenRows) {
+        mMainBuffer.setHistoryListener(listener, loggedScreenRows);
+    }
+
     public boolean isAlternateBufferActive() {
         return mScreen == mAltBuffer;
     }

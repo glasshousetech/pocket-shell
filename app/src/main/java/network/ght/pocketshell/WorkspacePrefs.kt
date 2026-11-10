@@ -10,4 +10,7 @@ object WorkspacePrefs {
     fun setKeepScreenOn(context: Context, value: Boolean) { prefs(context).edit().putBoolean("keep_screen_on",value).apply() }
     fun backgroundWork(context: Context) = prefs(context).getBoolean("background_work",true)
     fun setBackgroundWork(context: Context, value: Boolean) { prefs(context).edit().putBoolean("background_work",value).apply() }
+    /** The workspace menu (tab sidebar on wide screens, tab and action rows on phones) is folded away. */
+    fun workspaceCollapsed(context: Context) = prefs(context).getBoolean("workspace_collapsed",false)
+    fun setWorkspaceCollapsed(context: Context, value: Boolean) { prefs(context).edit().putBoolean("workspace_collapsed",value).apply() }
 }

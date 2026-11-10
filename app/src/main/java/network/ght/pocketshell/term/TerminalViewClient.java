@@ -30,19 +30,7 @@ public interface TerminalViewClient {
 
     boolean shouldBackButtonBeMappedToEscape();
 
-    boolean shouldEnforceCharBasedInput();
-
-    /**
-     * Pocket Shell addition. When true the terminal declares itself to the IME as an ordinary
-     * text field with suggestions disabled, so the keyboard keeps its toolbar row — voice
-     * typing, clipboard, emoji, settings — instead of hiding it the way it does for the
-     * password-style field {@link #shouldEnforceCharBasedInput()} asks for. Takes precedence
-     * over {@link #shouldEnforceCharBasedInput()} when both are true.
-     */
-    boolean shouldAllowFullImeFeatures();
-
     /** Uncommitted IME text for a local preview; never sent to the terminal or logged. */
-    default void onImeCompositionChanged(String text) {}
 
     /** Optional bulk path. Return false when per-code-point key/modifier handling is required. */
     default boolean onTextInput(CharSequence text, TerminalSession session) { return false; }

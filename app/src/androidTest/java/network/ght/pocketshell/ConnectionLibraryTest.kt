@@ -93,7 +93,10 @@ class ConnectionLibraryTest {
                 val dir = File(ctx.filesDir,"screenshots").apply{mkdirs()}
                 device.takeScreenshot(File(dir,"connection-library.png"))
                 device.findObject(By.text("Remove")).click()
-                device.findObject(By.text("Remove connection")).click()
+                // The confirmation is a new dialog; wait for it like the first Remove above.
+                val confirm = device.wait(Until.findObject(By.text("Remove connection")),5000)
+                assertNotNull("Removal asks for confirmation", confirm)
+                confirm.click()
                 assertTrue(device.wait(Until.hasObject(By.text("No matching connections.")),5000))
                 assertFalse(ConnectionStore.load(ctx).getOrThrow().any { it.profile.name == "Audit UI server" })
             }

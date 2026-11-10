@@ -11,7 +11,10 @@ Pocket Shell changes:
 
 - The outgoing PTY queue accepts bounded, atomic writes without blocking the Android
   main looper. The existing writer thread waits for the subprocess. Incoming output keeps
-  upstream's bounded blocking queue and main-thread emulator ownership.
+  a bounded blocking queue and main-thread emulator ownership.
+- Incoming output (2026-11-09): the queue is 64 KiB instead of 4 KiB, the reader posts a
+  main-thread wakeup only when none is pending, and each wakeup drains everything available
+  for up to 8 ms before yielding, with one screen update per drain instead of one per 4 KiB.
 - IME text commits batch code-point transformations into one queued write.
 - Bracketed paste is queued atomically; overload cannot leave an unmatched paste marker.
 - Explicit input rejection is reported to the session client; reviewed drafts can be retained.

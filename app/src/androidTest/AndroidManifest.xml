@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Synthetic fixtures only; this provider is never packaged in the product APK. -->
+        <provider android:name="network.ght.pocketshell.TransferFixtureProvider"
+            android:authorities="network.ght.pocketshell.test.transfer" android:exported="true" />
+    </application>
+</manifest>

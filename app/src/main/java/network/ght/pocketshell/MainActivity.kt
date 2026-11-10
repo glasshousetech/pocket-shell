@@ -26,6 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,12 +39,15 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.res.ResourcesCompat
 import network.ght.pocketshell.ui.*
@@ -68,6 +73,7 @@ class MainActivity : ComponentActivity() {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             serviceState.value = (binder as? TermService.LocalBinder)?.service
+            openRequestedTool()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             serviceState.value = null
@@ -76,6 +82,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Window.Callback is public Android API and receives the shortcut before
+        // either the terminal view or a text field interprets it as terminal input.
+        val previousCallback = window.callback
+        window.callback = object : android.view.Window.Callback by previousCallback {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (event.keyCode == KeyEvent.KEYCODE_P && event.isCtrlPressed && event.isShiftPressed) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                        serviceState.value?.openWorkbench()
+                    }
+                    return true
+                }
+                return previousCallback.dispatchKeyEvent(event)
+            }
+        }
         DiagnosticLog.record(this, "workspace", if (savedInstanceState == null) "activity_opened" else "activity_recreated")
         Clip.init(this)
         requestNotificationPermission()
@@ -98,6 +118,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun openRequestedTool() {
+        if (intent?.action == JobsWorkbench.OPEN_JOBS && serviceState.value != null) {
+            serviceState.value?.openWorkbench(WorkbenchState.Page.JOBS)
+            intent.action = null
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        serviceState.value?.takeIf { it.workbench.page == WorkbenchState.Page.JOBS }?.jobs?.refresh()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openRequestedTool()
     }
 
     override fun onDestroy() {
@@ -140,6 +178,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     // Phone terminals need ESC/TAB/CTRL/navigation constantly. Keep the row
     // visible by default; the handle still collapses it when screen space wins.
     var extraKeysOpen by remember { mutableStateOf(true) }
+    var workspaceCollapsed by remember { mutableStateOf(WorkspacePrefs.workspaceCollapsed(ctx)) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
     var textInputSessionId by service.reviewedTextTarget
@@ -389,7 +428,6 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onDismiss = { settingsOpen = false },
             // Re-negotiate the IME contract immediately so the keyboard on screen picks the
             // new mode up, instead of only the next one the user opens.
-            onKeyboardModeChanged = { viewClient.refreshIme() },
         )
     }
 
@@ -468,6 +506,100 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onConnect = { connect(it) },
             onDismiss = { connectionsOpen = false },
         )
+    }
+
+    fun captureOutput() {
+        val state = service.workbench
+        val holder = sessions.firstOrNull { it.id == state.targetId }
+        if (holder == null) { state.error = "The original tab is no longer open."; return }
+        state.outputLabel = holder.displayName
+        state.error = null
+        // Search the tab's complete history on device storage, not just what is in memory.
+        scope.launch {
+            val text = runCatching { service.fullHistory(holder) }.getOrElse {
+                state.error = "Saved history could not be read. Showing what is in memory."
+                holder.session.emulator?.screen?.transcriptText.orEmpty()
+            }
+            state.outputLines = text.split('\n')
+            state.matchIndex = 0
+            DiagnosticLog.record(ctx, "output_search", "snapshot_captured", tabId = holder.tabId)
+        }
+    }
+
+    if (service.workbench.page != null) {
+        WorkbenchDialog(service,
+            onConnect = ::connect,
+            onJobOutput = { job ->
+                runCatching {
+                    val holder = service.newSession(SessionMode.LINUX, startupCommand = "exec " + RemoteJobs.command(job.profile, RemoteJobs.outputScript(job), interactive = true), customName = job.name + " output")
+                    service.selectedSessionId.value = holder.id
+                    service.workbench.close()
+                }.onFailure { service.workbench.error = it.message ?: "Could not open job output." }
+            },
+            onResumeWorkspace = { profile, workspace ->
+                if (Userland.installedDistro(ctx) == null) {
+                    service.workbench.error = "Install Linux in Settings before opening a remote workspace."
+                } else runCatching { service.resumeWorkspace(profile, workspace) }
+                    .onSuccess { holder ->
+                        termViewRef.value?.let { view ->
+                            view.attachSession(holder.session)
+                            view.onScreenUpdated()
+                            viewClient.showKeyboard()
+                        }
+                    }.onFailure { service.workbench.error = it.message ?: "The workspace could not be opened." }
+            },
+            onRefreshOutput = ::captureOutput,
+            onInsert = { command ->
+                val state = service.workbench
+                val target = sessions.firstOrNull { it.id == state.targetId }
+                if (target == null || selectedSessionId != target.id) {
+                    state.error = "Select the original live tab before inserting."
+                } else {
+                    ReviewedCommand.insert(target, state.targetId, command, run = false)
+                        .onSuccess {
+                            state.using = null
+                            state.close()
+                            DiagnosticLog.record(ctx, "commands", "inserted", tabId = target.tabId)
+                            viewClient.showKeyboard()
+                        }.onFailure { state.error = it.message ?: "The command was not inserted. Your draft is kept." }
+                }
+            },
+            onAction = { action ->
+                val state = service.workbench
+                when (action) {
+                    "Search output" -> {
+                        state.targetId = selectedSessionId
+                        state.page = WorkbenchState.Page.OUTPUT
+                        captureOutput()
+                    }
+                    "Saved commands" -> { state.page = WorkbenchState.Page.COMMANDS; state.error = null }
+                    "Connection check" -> { state.page = WorkbenchState.Page.DIAGNOSIS; state.error = null }
+                    "Remote jobs" -> {
+                        if (service.jobs.profile == null) service.jobs.profile = sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile
+                            ?: SshShortcuts.profile(SshShortcuts.machines.first { it.id == "agent-prod" })
+                        state.page = WorkbenchState.Page.JOBS; state.error = null
+                    }
+                    "Remote files" -> {
+                        if (service.files.profile == null) sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile?.let(service.files::choose)
+                        state.page = WorkbenchState.Page.FILES; state.error = null
+                    }
+                    "Remote workspaces" -> {
+                        if (state.workspaceProfile == null) state.workspaceProfile = sessions.firstOrNull { it.id == selectedSessionId }?.connectionProfile
+                        state.page = WorkbenchState.Page.WORKSPACES; state.error = null
+                    }
+                    else -> {
+                        state.close()
+                        when (action) {
+                            "Connections" -> connectionsOpen = true
+                            "New tab" -> addLinux()
+                            "Text / voice" -> textInputSessionId = selectedSessionId
+                            "AI Copilot" -> copilotOpen = true
+                            "Themes" -> themeOpen = true
+                            "Settings" -> settingsOpen = true
+                        }
+                    }
+                }
+            })
     }
 
     if (sessions.isEmpty()) {
@@ -549,7 +681,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                 TabAction.MoveLeft -> service.moveSession(holder,-1)
                 TabAction.MoveRight -> service.moveSession(holder,1)
                 TabAction.CopyOutput -> Clip.copy(TabOutput.forClipboard(holder.session.emulator?.screen?.transcriptText))
-                TabAction.ClearScrollback -> { holder.session.emulator?.screen?.clearTranscript(); termViewRef.value?.let(TerminalInteraction::redraw) }
+                TabAction.ClearScrollback -> { holder.session.emulator?.screen?.clearTranscript(); service.clearHistory(holder); termViewRef.value?.let(TerminalInteraction::redraw) }
                 TabAction.ResetTerminal -> { if (holder.session.emulator != null) holder.session.reset(); termViewRef.value?.let(TerminalInteraction::redraw) }
                 TabAction.CloseOthers -> { service.closeOtherSessions(holder); showSession(holder) }
                 TabAction.Close -> closeTargetId = holder.id
@@ -579,10 +711,15 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onTheme = { themeOpen = true },
             onCopilot = { copilotOpen = !copilotOpen },
             onSettings = { settingsOpen = true },
+            collapsed = workspaceCollapsed,
+            onToggleCollapsed = {
+                workspaceCollapsed = !workspaceCollapsed
+                WorkspacePrefs.setWorkspaceCollapsed(ctx, workspaceCollapsed)
+            },
         )
     }
     Row(modifier = Modifier.fillMaxSize()) {
-      if (expandedWorkspace) Box(Modifier.width(220.dp).fillMaxHeight()) { controls(true) }
+      if (expandedWorkspace) Box(Modifier.width(if (workspaceCollapsed) 60.dp else 220.dp).fillMaxHeight()) { controls(true) }
       Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
         if (!expandedWorkspace) controls(false)
 
@@ -664,16 +801,6 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
           }
         }
 
-        if (viewClient.composingText.isNotEmpty()) {
-            Text(
-                text = "Composing: ${viewClient.composingText}",
-                modifier = Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 8.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
         Row(
             Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -685,6 +812,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     KeyChip("Live") { termViewRef.value?.let(TerminalInteraction::followOutput) }
                 }
             }
+            KeyChip("Actions") { viewClient.hideKeyboard(); service.openWorkbench() }
             KeyChip("Text / voice") {
                 viewClient.clearStickyModifiers()
                 textInputSessionId = active.id
@@ -700,6 +828,7 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     keys = extraKeys,
                     onEsc = { sendKey(KeyEvent.KEYCODE_ESCAPE) },
                     onTab = { sendKey(KeyEvent.KEYCODE_TAB) },
+                    onEnter = { sendKey(KeyEvent.KEYCODE_ENTER) },
                     onCtrl = { viewClient.toggleCtrl() },
                     onAlt = { viewClient.toggleAlt() },
                     onShift = { viewClient.toggleShift() },
@@ -793,8 +922,12 @@ private fun TabRail(
     onTheme: () -> Unit,
     onCopilot: () -> Unit,
     onSettings: () -> Unit,
+    collapsed: Boolean = false,
+    onToggleCollapsed: () -> Unit = {},
 ) {
     var menuFor by remember { mutableStateOf<Int?>(null) }
+    var railSize by remember { mutableStateOf(IntSize.Zero) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val tabs: @Composable () -> Unit = {
             sessions.forEachIndexed { i, holder ->
               key(holder.id) { Box {
@@ -802,8 +935,21 @@ private fun TabRail(
                 val alive = holder.alive.value
                 val accent = holder.accent()
                 val active = i == activeIndex
+                val tabVisibility = remember { BringIntoViewRequester() }
+                var tabSize by remember { mutableStateOf(IntSize.Zero) }
+                // Selection, reorder and folding can move the active tab outside the
+                // viewport. Reveal it after layout; ordinary manual scrolling stays free.
+                LaunchedEffect(active, i, sidebar, tabSize, railSize) {
+                    if (active && tabSize != IntSize.Zero && railSize != IntSize.Zero) {
+                        withFrameNanos { }
+                        tabVisibility.bringIntoView()
+                        DiagnosticLog.record(context, "workspace", "active_tab_revealed", tabId = holder.tabId)
+                    }
+                }
                 Column(
                     modifier = Modifier
+                        .bringIntoViewRequester(tabVisibility)
+                        .onSizeChanged { tabSize = it }
                         .then(if (sidebar) Modifier.fillMaxWidth() else Modifier.width(IntrinsicSize.Max))
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (active) RailBg else RailSurface)
@@ -847,10 +993,54 @@ private fun TabRail(
               } }
             }
     }
-    Column(Modifier.fillMaxWidth().then(if (sidebar) Modifier.fillMaxHeight() else Modifier).background(RailSurfaceAlt)) {
-        if (sidebar) {
-            Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.padding(14.dp))
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
+    // Collapsed sidebar: numbered tab buttons keep every tab one tap away in a 60 dp rail.
+    val compactTabs: @Composable () -> Unit = {
+        sessions.forEachIndexed { i, holder ->
+            key(holder.id) { Box {
+                val active = i == activeIndex
+                val label = holder.displayName
+                val accent = holder.accent()
+                Box(
+                    Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(if (active) RailBg else RailSurface)
+                        .semantics { contentDescription = "Tab ${i + 1}: $label"; selected = active }
+                        .combinedClickable(onClick = { onSelect(i) }, onLongClickLabel = "Tab options",
+                            onLongClick = { menuFor = holder.id; onMenuOpened() }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("${i + 1}", color = if (active) RailPromptText else RailAccentDim, fontFamily = RailMono, fontSize = 13.sp)
+                    Text("●", color = if (holder.alive.value) accent else RailDimText, fontSize = 7.sp,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(5.dp))
+                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.6f).height(2.dp)
+                        .background(if (active) accent else Color.Transparent))
+                }
+                TabMenu(expanded = menuFor == holder.id, holder = holder, index = i, count = sessions.size,
+                    onDismiss = { menuFor = null }, onAction = { onTabAction(holder,it) })
+            } }
+        }
+    }
+    val toggleLabel = if (collapsed) "Expand workspace menu" else "Collapse workspace menu"
+    val collapseToggle: @Composable (Modifier, String) -> Unit = { modifier, glyph ->
+        Box(modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).semantics { contentDescription = toggleLabel }
+            .clickable(onClickLabel = toggleLabel, onClick = onToggleCollapsed), contentAlignment = Alignment.Center) {
+            Text(glyph, color = RailAccentDim, fontSize = 18.sp)
+        }
+    }
+    Column(Modifier.fillMaxWidth().then(if (sidebar) Modifier.fillMaxHeight() else Modifier)
+        .onSizeChanged { railSize = it }.background(RailSurfaceAlt)) {
+        if (sidebar && collapsed) {
+            collapseToggle(Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), "»")
+            Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) { compactTabs() }
+            Column(Modifier.fillMaxWidth().padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                RailAction("+",onAdd,Modifier.fillMaxWidth().semantics { contentDescription = "New tab" })
+                RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
+            }
+        } else if (sidebar) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                collapseToggle(Modifier, "«")
+            }
+            Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
             Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 RailAction("Connect",onConnect,Modifier.fillMaxWidth())
                 RailAction("New tab",onAdd,Modifier.fillMaxWidth())
@@ -859,8 +1049,12 @@ private fun TabRail(
                 RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
             }
         } else {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,6.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).semantics { contentDescription = "Session tabs" }.horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,0.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
+                collapseToggle(Modifier, if (collapsed) "▾" else "▴")
+            }
+            // Collapsed on a phone: the tab row stays, the action row folds away for terminal space.
+            if (!collapsed) Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 RailAction("Connect",onConnect,Modifier.weight(1.3f))
                 RailAction("New tab",onAdd,Modifier.weight(1.2f))
                 RailAction("AI",onCopilot,Modifier.weight(.75f))
@@ -988,6 +1182,7 @@ private fun ExtraKeysRow(
     keys: List<ExtraKey>,
     onEsc: () -> Unit,
     onTab: () -> Unit,
+    onEnter: () -> Unit,
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
     onShift: () -> Unit,
@@ -1023,6 +1218,7 @@ private fun ExtraKeysRow(
                 when (key) {
                     ExtraKeysLayouts.ESC -> KeyChip(key.label, onClick = onEsc)
                     ExtraKeysLayouts.TAB -> KeyChip(key.label, onClick = onTab)
+                    ExtraKeysLayouts.ENTER -> KeyChip(key.label, onClick = onEnter)
                     ExtraKeysLayouts.CTRL -> KeyChip(key.label, active = ctrlActive, onLongClick = onCtrlLongPress, onClick = onCtrl)
                     ExtraKeysLayouts.ALT -> KeyChip(key.label, active = altActive, onLongClick = onAltLongPress, onClick = onAlt)
                     ExtraKeysLayouts.SHIFT -> KeyChip(key.label, active = shiftActive, onClick = onShift)

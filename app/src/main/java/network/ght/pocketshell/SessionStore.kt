@@ -13,9 +13,9 @@ import java.util.concurrent.Executors
  * (low-memory-killer, force-stop, reboot). [TermService]'s foreground service
  * already keeps sessions alive across backgrounding/Activity recreation — this
  * covers the case that survives *nothing*: the actual PTY/shell processes are
- * gone either way, so what we save here is just enough to redraw a convincing
- * "as you left it" screen (mode, title, cwd, scrollback text), not to resume
- * a running command.
+ * gone. Save the retained output as explicitly historical text. An exact remote
+ * workspace identity can additionally reconnect to a still-running server-side
+ * process; the local snapshot itself never establishes that the process survived.
  *
  * Uses org.json (bundled with the Android SDK) — no extra dependency needed.
  * Lives in [Context.getNoBackupFilesDir] rather than filesDir: it's internal
@@ -28,10 +28,12 @@ object SessionStore {
     }
 
     private const val FILE_NAME = "sessions_snapshot.json"
-    private const val VERSION = 2
+    private const val VERSION = 3
 
-    /** Cap per session so the snapshot file (and restore) stays cheap. */
-    private const val MAX_TRANSCRIPT_CHARS = 8_000
+    // Writer-thread state. Identical periodic snapshots are not rewritten, and an existing
+    // file's version is verified once per process instead of re-parsing it before every save.
+    private var lastWritten: List<Saved>? = null
+    private var existingVersionVerified = false
 
     data class Saved(
         val mode: SessionMode,
@@ -43,17 +45,11 @@ object SessionStore {
         val color: String? = null,
         val startupCommand: String? = null,
         val connectionProfile: SshProfile? = null,
+        val remoteWorkspace: RemoteWorkspace? = null,
+        val restoreNotice: String? = null,
     )
 
     private fun file(context: Context): File = File(context.noBackupFilesDir, FILE_NAME)
-
-    /** Drop the oldest lines beyond the cap, and never start mid-line. */
-    private fun capTranscript(text: String): String {
-        if (text.length <= MAX_TRANSCRIPT_CHARS) return text
-        val tail = text.takeLast(MAX_TRANSCRIPT_CHARS)
-        val newline = tail.indexOf('\n')
-        return if (newline in 0 until tail.length - 1) tail.substring(newline + 1) else tail
-    }
 
     /** Overwrites the snapshot. Pass an empty list to effectively clear it. */
     fun save(context: Context, sessions: List<Saved>) {
@@ -67,7 +63,13 @@ object SessionStore {
             clearOnWriter(context)
             return
         }
+        if (sessions == lastWritten && file(context).exists()) return
         runCatching {
+            if (!existingVersionVerified && file(context).exists()) {
+                val previous = JSONObject(AtomicFile(file(context)).openRead().bufferedReader().use { it.readText() })
+                require(previous.optInt("version", 1) in 1..VERSION) { "Unsupported snapshot version; existing history was kept." }
+            }
+            existingVersionVerified = true
             val arr = JSONArray()
             sessions.forEach { s ->
                 val o = JSONObject()
@@ -78,9 +80,13 @@ object SessionStore {
                 s.startupCommand?.let { o.put("startupCommand",it) }
                 s.connectionProfile?.let { p -> o.put("connection", JSONObject().put("name",p.name).put("host",p.host)
                     .put("user",p.user).put("port",p.port).put("tmux",p.tmuxSession).put("remote",p.remoteCommand)) }
+                s.remoteWorkspace?.validate()?.let { w -> o.put("remoteWorkspace", JSONObject()
+                    .put("id", w.id).put("created", w.created).put("name", w.name)
+                    .put("windows", w.windows).put("clients", w.clients)
+                    .put("serverPid", w.serverPid).put("serverStarted", w.serverStarted)) }
                 o.put("title", s.title)
                 if (!s.cwd.isNullOrBlank()) o.put("cwd", s.cwd)
-                o.put("transcript", capTranscript(s.transcript))
+                o.put("transcript", s.transcript)
                 arr.put(o)
             }
             val root = JSONObject().put("version", VERSION).put("sessions", arr)
@@ -90,11 +96,15 @@ object SessionStore {
             try {
                 stream.write(root.toString().toByteArray(Charsets.UTF_8))
                 atomic.finishWrite(stream)
+                lastWritten = sessions
             } catch (e: Exception) {
                 atomic.failWrite(stream)
                 throw e
             }
-        }.onFailure { Log.w("PocketShell.SessionStore", "Could not save session history (${it.javaClass.simpleName})") }
+        }.onFailure {
+            Log.w("PocketShell.SessionStore", "Could not save session history (${it.javaClass.simpleName})")
+            DiagnosticLog.record(context, "session_store", "save_failed", it.javaClass.simpleName)
+        }
     }
 
     /** Reads the snapshot, if any. Never throws — a corrupt file just yields nothing. */
@@ -107,6 +117,7 @@ object SessionStore {
         val f = file(context)
         return runCatching {
             val root = JSONObject(AtomicFile(f).openRead().bufferedReader().use { it.readText() })
+            require(root.optInt("version", 1) in 1..VERSION) { "Unsupported snapshot version" }
             val arr = root.optJSONArray("sessions") ?: return emptyList()
             val seen = mutableSetOf<String>()
             (0 until arr.length()).mapNotNull { i ->
@@ -116,6 +127,17 @@ object SessionStore {
                 val restoredId = TabIdentity.restore(o.optString("tabId")).let { id ->
                     if (seen.add(id)) id else TabIdentity.create().also { seen.add(it) }
                 }
+                val profile = o.optJSONObject("connection")?.let { p -> runCatching {
+                    SshProfile(p.getString("name"), p.getString("host"), p.optString("user"), p.getInt("port"), p.optString("tmux"), p.optString("remote"))
+                        .also { it.command() }
+                }.getOrNull() }
+                val workspace = o.optJSONObject("remoteWorkspace")?.let { w -> runCatching {
+                    RemoteWorkspace(w.getString("id"), w.getLong("created"), w.getString("name"),
+                        w.getInt("windows"), w.getInt("clients"), w.getLong("serverPid"), w.getLong("serverStarted")).validate()
+                        .also { require(mode == SessionMode.LINUX && profile != null); RemoteWorkspaces.attachCommand(requireNotNull(profile), it) }
+                }.getOrNull() }
+                val rejectedWorkspace = o.has("remoteWorkspace") && workspace == null
+                if (rejectedWorkspace) DiagnosticLog.record(context, "remote_workspace", "restore_identity_rejected", "InvalidSavedIdentity", restoredId)
                 Saved(
                     mode = mode,
                     title = o.optString("title").ifBlank { "sh" },
@@ -125,15 +147,17 @@ object SessionStore {
                     color = TabColors.byId(o.optString("color"))?.id,
                     // Legacy commands without an explicit tab identity could rejoin a
                     // shared tmux workspace. Keep their history, require a fresh Connect.
-                    startupCommand = o.optString("startupCommand").takeIf { it.contains(restoredId) },
-                    connectionProfile = o.optJSONObject("connection")?.let { p -> runCatching {
-                        SshProfile(p.getString("name"),p.getString("host"),p.optString("user"),p.getInt("port"),p.optString("tmux"),p.optString("remote"))
-                            .also { it.command() }
-                    }.getOrNull() },
+                    startupCommand = o.optString("startupCommand").takeIf { !rejectedWorkspace && it.contains(restoredId) },
+                    connectionProfile = if (rejectedWorkspace) null else profile,
+                    remoteWorkspace = workspace,
+                    restoreNotice = if (rejectedWorkspace) "Saved remote identity could not be verified. History was kept; use Remote workspaces to reconnect." else null,
                     tabId = restoredId,
                 )
             }
-        }.getOrElse { emptyList() }
+        }.getOrElse { failure ->
+            if (f.exists()) DiagnosticLog.record(context, "session_store", "read_failed", failure.javaClass.simpleName)
+            emptyList()
+        }
     }
 
     /** Consumes the snapshot so a later clean cold start doesn't replay stale history. */
@@ -143,6 +167,7 @@ object SessionStore {
     }
 
     private fun clearOnWriter(context: Context) {
+        lastWritten = null
         AtomicFile(file(context)).delete()
         runCatching { File(file(context).parentFile, "$FILE_NAME.tmp").delete() }
     }

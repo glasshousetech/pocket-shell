@@ -50,7 +50,24 @@ object DiagnosticLog {
         return writer.submit<String> {
             val directory = File(context.filesDir, "diagnostics")
             listOf("events.previous.jsonl", "events.jsonl").map { File(directory, it) }
-                .filter { it.isFile }.joinToString("") { it.readText() }
+                .filter { it.isFile }.joinToString("") { it.readText() } +
+                Distro.ALL.joinToString("") { distro ->
+                    runCatching {
+                        GuestGroupNames.readEvents(Userland.rootfsDir(context, distro)).joinToString("") { event ->
+                            JSONObject().put("at", event.at).put("build", event.build)
+                                .put("component", "linux").put("event", "android_group_" + event.state)
+                                .put("session", "guest-" + event.process).put("groupId", event.groupId)
+                                .put("distro", distro.id).put("exitCode", event.exitCode)
+                                .put("severity", if (event.state in setOf("failed", "enumeration_failed")) "warning" else "info")
+                                .toString() + "\n"
+                        }
+                    }.getOrElse { error ->
+                        JSONObject().put("at", Instant.now().toString()).put("build", BuildConfig.VERSION_CODE)
+                            .put("component", "linux").put("event", "android_group_diagnostics_unavailable")
+                            .put("session", correlation).put("distro", distro.id).put("severity", "warning")
+                            .put("errorType", error.javaClass.simpleName).toString() + "\n"
+                    }
+                }
         }.get(5, TimeUnit.SECONDS)
     }
 }

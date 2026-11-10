@@ -18,29 +18,6 @@ import network.ght.pocketshell.term.TerminalView
 import network.ght.pocketshell.term.TerminalViewClient
 import kotlin.math.roundToInt
 
-/**
- * How much of the soft keyboard the terminal asks for.
- *
- * Upstream Termux declares the terminal as a password-style field so no IME ever autocorrects a
- * command. Every mainstream keyboard — Microsoft SwiftKey, Gboard, Samsung — reacts by hiding its
- * whole toolbar row, and that row is where voice typing, the clipboard and emoji live. Full mode
- * declares an ordinary text field with suggestions switched off instead: the row comes back and
- * autocorrect stays off. Terminal-safe mode restores the upstream behaviour for anyone whose
- * keyboard misbehaves in a text field.
- */
-object KeyboardPrefs {
-    private const val KEY_FULL_IME = "full_ime_features"
-
-    private fun prefs(context: Context) =
-        context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-
-    fun fullImeFeatures(context: Context): Boolean = prefs(context).getBoolean(KEY_FULL_IME, true)
-
-    fun setFullImeFeatures(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_FULL_IME, value).apply()
-    }
-}
-
 internal const val PREFS_FILE = "pocketshell_prefs"
 
 /** App-wide clipboard access; initialized once from the Activity. */
@@ -87,10 +64,6 @@ class RailViewClient(
     var altDown by mutableStateOf(false)
     var shiftDown by mutableStateOf(false)
     var fnDown by mutableStateOf(false)
-    var composingText by mutableStateOf("")
-        private set
-
-    override fun onImeCompositionChanged(text: String) { composingText = text }
 
     override fun onTextInput(text: CharSequence, session: TerminalSession): Boolean {
         if (ctrlDown || altDown || shiftDown || fnDown) return false
@@ -135,14 +108,6 @@ class RailViewClient(
             view?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(listener)
         }
         keyboardFocusListener = null
-    }
-
-    /**
-     * Re-negotiate the IME contract after the keyboard-mode setting changes, so the keyboard
-     * already on screen picks it up instead of only the next one.
-     */
-    fun refreshIme() {
-        view?.refreshImeConfiguration()
     }
 
     fun showKeyboard() {
@@ -200,11 +165,6 @@ class RailViewClient(
     override fun onSingleTapUp(e: MotionEvent) = showKeyboard()
 
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
-    override fun shouldEnforceCharBasedInput(): Boolean = true
-
-    // Read live rather than cached: the setting can change while a session is open, and
-    // TerminalView asks again on every restartInput().
-    override fun shouldAllowFullImeFeatures(): Boolean = KeyboardPrefs.fullImeFeatures(context)
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
     override fun isTerminalViewSelected(): Boolean = true
 

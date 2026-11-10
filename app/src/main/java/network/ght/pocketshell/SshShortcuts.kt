@@ -36,10 +36,13 @@ object SshShortcuts {
         "  TCPKeepAlive yes\n  IdentitiesOnly yes\n  IdentityFile ~/.ssh/id_ed25519\n"
 
     val machines = listOf(
+        GhtMachine("agent-prod", "Agent workspace", listOf("agent-prod", "agent-01-guest"), "ght-agents · builds, tests and coding agents"),
+        GhtMachine("agent-01", "Agent server", listOf("agent-01", "agent-01.ght.network", "interserver-agent"), "agent-01 · infrastructure host"),
+        GhtMachine("public-01", "Public apps", listOf("public-01", "public-01.ght.network", "interserver-public"), "public-01 · production applications"),
         GhtMachine("alientop", "Laptop · GHT-AlienTop", listOf("alientop", "alientop.ght.network", "laptop"),
             "Connor's Alienware"),
-        GhtMachine("mob", "MOB server", listOf("mob", "mob.ght.network"), "GHT-MOB-SERVER build + Recall worker"),
-        GhtMachine("dev", "Dev server", listOf("dev", "gh-cloud-2", "ght-dev-server"), "gh-cloud-2 · builds and experiments"),
+        GhtMachine("mob", "MOB server", listOf("mob", "mob.ght.network"), "GHT-MOB-SERVER · legacy Recall worker"),
+        GhtMachine("dev", "Dev server", listOf("dev", "gh-cloud-2", "ght-dev-server"), "gh-cloud-2 · legacy services"),
         GhtMachine("deploy", "Deploy server", listOf("deploy", "ght-deploy", "ght-deploy-server"), "Vultr · OnlyTechs live traffic"),
         GhtMachine("sfo", "SFO VPN node", listOf("sfo", "gh-cloud-vpn-sfo"), "gh-cloud-vpn-sfo"),
     )

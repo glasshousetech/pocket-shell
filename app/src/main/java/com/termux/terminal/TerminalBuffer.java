@@ -17,6 +17,57 @@ public final class TerminalBuffer {
     int mScreenRows, mColumns;
     /** The number of rows kept in history. */
     private int mActiveTranscriptRows = 0;
+
+    /**
+     * Pocket Shell: receives every row exactly once, at the moment it becomes permanent scrollback (rows above the
+     * screen can no longer be changed by programs). Lets the app keep complete session history on device storage
+     * while only the most recent rows stay in memory.
+     */
+    public interface HistoryListener {
+        /** @param text the row's text; @param wrapsToNext true when the logical line continues on the next row. */
+        void onHistoryRow(String text, boolean wrapsToNext);
+    }
+
+    private HistoryListener mHistoryListener;
+    /**
+     * Pocket Shell: the listener already received the top this-many screen rows (they came back from scrollback
+     * when the screen grew, e.g. the keyboard closed). They are skipped when they scroll out again, unless written to.
+     */
+    private int mLoggedScreenRows;
+    /** Pocket Shell: true while a column change rebuilds the buffer; rows moving then are not new history. */
+    private boolean mReflowing;
+    private int mReflowScrolls;
+    /** Pocket Shell: style for rows allocated on demand (the current style during a rebuild, as upstream used). */
+    private long mAllocationStyle;
+
+    /**
+     * Pocket Shell: deliver future scrollback rows to {@code listener}.
+     *
+     * @param loggedScreenRows how many top screen rows the listener's history already contains.
+     */
+    public void setHistoryListener(HistoryListener listener, int loggedScreenRows) {
+        mHistoryListener = listener;
+        mLoggedScreenRows = Math.max(0, Math.min(loggedScreenRows, mScreenRows));
+    }
+
+    /** Pocket Shell: top screen rows the history listener already has. */
+    public int getLoggedScreenRows() {
+        return mLoggedScreenRows;
+    }
+
+    private void emitHistoryRow(int externalRow) {
+        TerminalRow row = mLines[externalToInternalRow(externalRow)];
+        if (row == null) {
+            mHistoryListener.onHistoryRow("", false);
+            return;
+        }
+        mHistoryListener.onHistoryRow(getSelectedText(0, externalRow, mColumns, externalRow, true, false), row.mLineWrap);
+    }
+
+    /** Pocket Shell: a screen row's content changed, so it and every row below it must be logged when they leave. */
+    private void noteRowModified(int externalRow) {
+        if (externalRow < mLoggedScreenRows && !mReflowing) mLoggedScreenRows = Math.max(0, externalRow);
+    }
     /** The index in the circular buffer where the visible screen starts. */
     private int mScreenFirstRow = 0;
 
@@ -74,6 +125,11 @@ public final class TerminalBuffer {
                 x2 = columns;
             }
             TerminalRow lineObject = mLines[externalToInternalRow(row)];
+            if (lineObject == null) {
+                // Pocket Shell: rows are allocated on demand; an unallocated row is blank.
+                if (row < selY2 && row < mScreenRows - 1) builder.append('\n');
+                continue;
+            }
             int x1Index = lineObject.findStartOfColumn(x1);
             int x2Index = (x2 < mColumns) ? lineObject.findStartOfColumn(x2) : lineObject.getSpaceUsed();
             if (x2Index == x1Index) {
@@ -178,15 +234,17 @@ public final class TerminalBuffer {
     }
 
     public void setLineWrap(int row) {
-        mLines[externalToInternalRow(row)].mLineWrap = true;
+        allocateFullLineIfNecessary(externalToInternalRow(row)).mLineWrap = true;
     }
 
     public boolean getLineWrap(int row) {
-        return mLines[externalToInternalRow(row)].mLineWrap;
+        TerminalRow line = mLines[externalToInternalRow(row)];
+        return line != null && line.mLineWrap;
     }
 
     public void clearLineWrap(int row) {
-        mLines[externalToInternalRow(row)].mLineWrap = false;
+        TerminalRow line = mLines[externalToInternalRow(row)];
+        if (line != null) line.mLineWrap = false;
     }
 
     /**
@@ -221,6 +279,18 @@ public final class TerminalBuffer {
                     shiftDownOfTopRow = actualShift;
                 }
             }
+            if (mHistoryListener != null && !altScreen) {
+                if (shiftDownOfTopRow > 0) {
+                    // Pocket Shell: the top rows become scrollback without scrolling. Log those not logged yet.
+                    for (int i = 0; i < shiftDownOfTopRow; i++) {
+                        if (mLoggedScreenRows > 0) mLoggedScreenRows--;
+                        else emitHistoryRow(i);
+                    }
+                } else if (shiftDownOfTopRow < 0) {
+                    // Rows returning from scrollback were already logged.
+                    mLoggedScreenRows = Math.min(newRows, mLoggedScreenRows - shiftDownOfTopRow);
+                }
+            }
             mScreenFirstRow += shiftDownOfTopRow;
             mScreenFirstRow = (mScreenFirstRow < 0) ? (mScreenFirstRow + mTotalRows) : (mScreenFirstRow % mTotalRows);
             mTotalRows = newTotalRows;
@@ -230,9 +300,17 @@ public final class TerminalBuffer {
         } else {
             // Copy away old state and update new:
             TerminalRow[] oldLines = mLines;
+            // Pocket Shell: upstream allocated all newTotalRows rows here (20,000 rows, ~25 MB at Fold widths) on
+            // every column change. Rows are allocated as they are used; see the end of this branch.
             mLines = new TerminalRow[newTotalRows];
-            for (int i = 0; i < newTotalRows; i++)
-                mLines[i] = new TerminalRow(newColumns, currentStyle);
+            final boolean trackHistory = mHistoryListener != null && !altScreen;
+            final int firstUnloggedOldRow = mLoggedScreenRows;
+            int unloggedMarkerRow = Integer.MIN_VALUE;
+            int unloggedMarkerScrolls = 0;
+            mReflowing = true;
+            mReflowScrolls = 0;
+            // Rows created during the rebuild get the same style upstream's eager allocation gave them.
+            mAllocationStyle = currentStyle;
 
             final int oldActiveTranscriptRows = mActiveTranscriptRows;
             final int oldScreenFirstRow = mScreenFirstRow;
@@ -278,6 +356,12 @@ public final class TerminalBuffer {
                         currentOutputExternalColumn = 0;
                     }
                     skippedBlankLines = 0;
+                }
+
+                if (trackHistory && unloggedMarkerRow == Integer.MIN_VALUE && externalOldRow >= firstUnloggedOldRow) {
+                    // Pocket Shell: first content the history listener has not received yet.
+                    unloggedMarkerRow = currentOutputExternalRow;
+                    unloggedMarkerScrolls = mReflowScrolls;
                 }
 
                 int lastNonSpaceIndex = 0;
@@ -344,6 +428,27 @@ public final class TerminalBuffer {
 
             cursor[0] = newCursorColumn;
             cursor[1] = newCursorRow;
+
+            // Pocket Shell: keep the invariant that every active row exists, without allocating unused capacity.
+            for (int row = -mActiveTranscriptRows; row < mScreenRows; row++)
+                allocateFullLineIfNecessary(externalToInternalRow(row));
+            mReflowing = false;
+            mAllocationStyle = 0;
+            if (trackHistory) {
+                if (unloggedMarkerRow == Integer.MIN_VALUE) {
+                    // Everything before the cursor was already history; the cursor row onward is new.
+                    mLoggedScreenRows = Math.max(0, Math.min(newCursorRow, mScreenRows));
+                } else {
+                    int markerNow = unloggedMarkerRow - (mReflowScrolls - unloggedMarkerScrolls);
+                    if (markerNow >= 0) {
+                        mLoggedScreenRows = markerNow;
+                    } else {
+                        // Unlogged rows were pushed into scrollback by the reflow: deliver them now, in order.
+                        for (int row = Math.max(markerNow, -mActiveTranscriptRows); row < 0; row++) emitHistoryRow(row);
+                        mLoggedScreenRows = 0;
+                    }
+                }
+            }
         }
 
         // Handle cursor scrolling off screen:
@@ -393,6 +498,14 @@ public final class TerminalBuffer {
         // Note that the history has grown if not already full:
         if (mActiveTranscriptRows < mTotalRows - mScreenRows) mActiveTranscriptRows++;
 
+        if (mReflowing) {
+            mReflowScrolls++;
+        } else if (mHistoryListener != null && mTotalRows > mScreenRows) {
+            // Pocket Shell: external row -1 is the row that just left the screen (see blockCopyLinesDown).
+            if (topMargin == 0 && mLoggedScreenRows > 0) mLoggedScreenRows--;
+            else emitHistoryRow(-1);
+        }
+
         // Blank the newly revealed line above the bottom margin:
         int blankRow = externalToInternalRow(bottomMargin - 1);
         if (mLines[blankRow] == null) {
@@ -416,6 +529,7 @@ public final class TerminalBuffer {
      */
     public void blockCopy(int sx, int sy, int w, int h, int dx, int dy) {
         if (w == 0) return;
+        noteRowModified(dy);
         if (sx < 0 || sx + w > mColumns || sy < 0 || sy + h > mScreenRows || dx < 0 || dx + w > mColumns || dy < 0 || dy + h > mScreenRows)
             throw new IllegalArgumentException();
         boolean copyingUp = sy > dy;
@@ -432,6 +546,7 @@ public final class TerminalBuffer {
      * of characters.
      */
     public void blockSet(int sx, int sy, int w, int h, int val, long style) {
+        noteRowModified(sy);
         if (sx < 0 || sx + w > mColumns || sy < 0 || sy + h > mScreenRows) {
             throw new IllegalArgumentException(
                 "Illegal arguments! blockSet(" + sx + ", " + sy + ", " + w + ", " + h + ", " + val + ", " + mColumns + ", " + mScreenRows + ")");
@@ -442,12 +557,13 @@ public final class TerminalBuffer {
     }
 
     public TerminalRow allocateFullLineIfNecessary(int row) {
-        return (mLines[row] == null) ? (mLines[row] = new TerminalRow(mColumns, 0)) : mLines[row];
+        return (mLines[row] == null) ? (mLines[row] = new TerminalRow(mColumns, mAllocationStyle)) : mLines[row];
     }
 
     public void setChar(int column, int row, int codePoint, long style) {
         if (row >= mScreenRows || column >= mColumns)
             throw new IllegalArgumentException("row=" + row + ", column=" + column + ", mScreenRows=" + mScreenRows + ", mColumns=" + mColumns);
+        if (row < mLoggedScreenRows) noteRowModified(row);
         row = externalToInternalRow(row);
         allocateFullLineIfNecessary(row).setChar(column, codePoint, style);
     }
@@ -459,8 +575,9 @@ public final class TerminalBuffer {
     /** Support for http://vt100.net/docs/vt510-rm/DECCARA and http://vt100.net/docs/vt510-rm/DECCARA */
     public void setOrClearEffect(int bits, boolean setOrClear, boolean reverse, boolean rectangular, int leftMargin, int rightMargin, int top, int left,
                                  int bottom, int right) {
+        noteRowModified(top);
         for (int y = top; y < bottom; y++) {
-            TerminalRow line = mLines[externalToInternalRow(y)];
+            TerminalRow line = allocateFullLineIfNecessary(externalToInternalRow(y));
             int startOfLine = (rectangular || y == top) ? left : leftMargin;
             int endOfLine = (rectangular || y + 1 == bottom) ? right : rightMargin;
             for (int x = startOfLine; x < endOfLine; x++) {

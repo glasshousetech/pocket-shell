@@ -2,6 +2,10 @@ package network.ght.pocketshell
 
 import android.graphics.Bitmap
 import android.util.Log
+import android.Manifest
+import android.os.Build
+import java.util.regex.Pattern
+import org.junit.Assert.assertTrue
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,12 +18,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Not a correctness gate (see [TerminalSmokeTest] for that) — walks the app
- * through a handful of real screens and saves a screenshot of each, so
- * someone can see what Pocket Shell actually looks like without needing a
- * local emulator on a resource-constrained host. Manually triggered only
- * (see the `screenshots` CI job): UI-coordinate/text automation like this is
- * more brittle than the smoke test and shouldn't gate releases.
+ * Verifies fresh Alpine setup reaches a terminal, then captures real app screens.
+ * The screenshot gallery complements the behavior assertions in the native tests.
  */
 @RunWith(AndroidJUnit4::class)
 class ScreenshotTest {
@@ -28,6 +28,13 @@ class ScreenshotTest {
     fun captureAppScreens() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
+        val packageName = instrumentation.targetContext.packageName
+        if (Build.VERSION.SDK_INT >= 33) {
+            instrumentation.uiAutomation.grantRuntimePermission(packageName, Manifest.permission.POST_NOTIFICATIONS)
+        }
+        // TerminalView exposes android.view.View to accessibility. Match its actual
+        // rendered ready transcript instead of assuming the Java class is exported.
+        val terminalSelector = By.pkg(packageName).descContains("Pocket Shell is ready.")
         // filesDir (app-private internal storage) is always non-null, unlike
         // getExternalFilesDir(null) which returned null on this AVD image and
         // silently wrote screenshots nowhere useful. Pulled off-device via
@@ -38,10 +45,8 @@ class ScreenshotTest {
         var shot = 0
         fun capture(name: String) {
             shot++
-            val bitmap: Bitmap? = instrumentation.uiAutomation.takeScreenshot()
-            if (bitmap == null) {
-                Log.w(TAG, "takeScreenshot() returned null for $name")
-                return
+            val bitmap: Bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot()) {
+                "Screenshot capture returned no frame for $name"
             }
             val file = File(outDir, "%02d_%s.png".format(shot, name))
             FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -54,63 +59,83 @@ class ScreenshotTest {
             if (device.wait(Until.findObject(By.text("Set up Pocket Shell")), 15_000) != null) {
                 capture("first_run_setup")
                 device.findObject(By.text("Alpine Linux"))?.click()
-                device.wait(Until.findObject(By.clazz(TERMINAL)), 240_000)
+                val setupTimeout = InstrumentationRegistry.getArguments().getString("setupTimeoutMs")?.toLongOrNull()
+                    ?: 20 * 60_000L
+                require(setupTimeout > 0)
+                val deadline = android.os.SystemClock.elapsedRealtime() + setupTimeout
+                while (android.os.SystemClock.elapsedRealtime() < deadline &&
+                    !device.hasObject(terminalSelector) &&
+                    !device.hasObject(By.text("Couldn't set up Linux"))) {
+                    // Wait for the terminal while also checking for a recoverable setup error.
+                    device.wait(Until.hasObject(terminalSelector), 1_000)
+                }
             }
-            if (device.wait(Until.findObject(By.clazz(TERMINAL)), 15_000) == null) {
-                // proot cannot fork under the emulator kernel ("/bin/sh: can't fork:
-                // Function not implemented"), and first run will not release the UI
-                // without a working Linux install. Capture the failure and stop rather
-                // than filling the artifact with identical pictures of the gate.
+            if (device.wait(Until.findObject(terminalSelector), 15_000) == null) {
+                // A failed or stalled install must fail the run and retain diagnostics.
                 capture("setup_failed")
-                Log.w(TAG, "no terminal after setup — see the setup_failed capture")
-                return@use
+                device.dumpWindowHierarchy(File(outDir, "setup-failure.xml"))
+                File(outDir, "setup-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
+                val messages = device.findObjects(By.pkg(instrumentation.targetContext.packageName))
+                    .mapNotNull { it.text }.filter { it.isNotBlank() }
+                throw AssertionError("Fresh Alpine setup did not reach a terminal: " + messages.joinToString(" | "))
             }
-            Thread.sleep(1_500) // let the shell prompt actually render
+            device.waitForIdle() // present the actual ready frame
             capture("launch_shell")
 
             // Focus the terminal (window focus alone doesn't route text input;
             // it needs an explicit tap), then run a real command and capture it.
-            device.findObject(By.clazz(TERMINAL))?.click()
-            Thread.sleep(300)
+            device.findObject(terminalSelector)?.click()
+            device.waitForIdle()
             device.executeShellCommand("input text echo%sPOCKETSHELL_SCREENSHOT_DEMO")
             device.pressEnter()
-            Thread.sleep(1_000)
+            val outputSelector = By.pkg(packageName).desc(Pattern.compile(
+                "(?s).*\nPOCKETSHELL_SCREENSHOT_DEMO\r?\n.*",
+            ))
+            assertTrue("A real command must produce its own output line, not merely echo input",
+                device.wait(Until.hasObject(outputSelector), 15_000))
+            File(outDir, "first-use-transcript.txt").writeText(
+                device.findObject(outputSelector).contentDescription.orEmpty())
+            File(outDir, "first-use-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
             capture("command_output")
 
-            device.findObject(By.text("⚙"))?.click()
-            device.wait(Until.findObject(By.text("AI Copilot")), 5_000)
+            fun click(label: String) {
+                requireNotNull(device.wait(Until.findObject(By.text(label)), 5_000)) {
+                    "Missing capture control: " + label
+                }.click()
+                device.waitForIdle()
+            }
+            fun visible(label: String) {
+                assertTrue("Expected capture screen: " + label,
+                    device.wait(Until.hasObject(By.text(label)), 5_000))
+            }
+            requireNotNull(device.wait(Until.findObject(By.desc("Settings")), 5_000)).click()
+            visible("Pocket Shell Settings")
             capture("settings")
 
-            // The Keyboard section sits below the AI block in the scrolling dialog.
-            repeat(6) {
-                if (device.findObject(By.text("Keyboard")) == null) {
-                    device.swipe(
-                        device.displayWidth / 2, (device.displayHeight * 0.72).toInt(),
-                        device.displayWidth / 2, (device.displayHeight * 0.38).toInt(), 12,
-                    )
-                    Thread.sleep(400)
-                }
-            }
+            click("Keyboard")
+            visible("Customize terminal keys")
+            assertTrue("Keyboard preferences must actually be visible",
+                device.wait(Until.hasObject(By.textContains("Your keyboard’s voice, clipboard")), 5_000))
             capture("settings_keyboard")
             device.pressBack()
-            Thread.sleep(300)
+            assertTrue(device.wait(Until.gone(By.text("Pocket Shell Settings")), 5_000))
 
-            device.findObject(By.text("AI"))?.click()
-            Thread.sleep(500)
+            click("AI")
+            visible("Close AI")
             capture("copilot_panel")
-            device.findObject(By.text("AI"))?.click() // close it again
-            Thread.sleep(300)
+            click("Close AI")
+            assertTrue(device.wait(Until.gone(By.text("Close AI")), 5_000))
 
-            device.findObject(By.text("Theme"))?.click()
-            Thread.sleep(500)
+            click("Theme")
+            visible("Themes")
             capture("theme_picker")
-            device.pressBack()
-            Thread.sleep(300)
+            click("Close")
+            assertTrue(device.wait(Until.gone(By.text("Themes")), 5_000))
 
-            device.findObject(By.text("Connect"))?.click()
-            Thread.sleep(700)
+            click("Connect")
+            visible("Connections")
             capture("connections")
-            device.pressBack()
+            click("Close connections")
         }
 
         Log.i(TAG, "final dir listing: ${outDir.listFiles()?.joinToString { it.name }}")
@@ -118,6 +143,5 @@ class ScreenshotTest {
 
     private companion object {
         const val TAG = "PocketShellScreenshotTest"
-        const val TERMINAL = "network.ght.pocketshell.term.TerminalView"
     }
 }

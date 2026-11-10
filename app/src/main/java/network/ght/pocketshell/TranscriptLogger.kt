@@ -8,14 +8,15 @@ import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Opt-in, local-only, sampled debug history. No network upload and no keystore work per redraw. */
+/**
+ * Opt-in, local-only, sampled debug history. No network upload and no keystore work per redraw.
+ * It grows with use on device storage; complete per-tab history lives in [SessionHistory].
+ */
 object TranscriptLogger {
-    private const val MAX_LOG_BYTES = 512 * 1024
     private val handler = Handler(Looper.getMainLooper())
     private class Capture {
         @Volatile var active = true
@@ -24,7 +25,7 @@ object TranscriptLogger {
     }
     private data class Entry(val context: Context, val id: Int, val capture: Capture, val text: String)
     private val captures = mutableMapOf<Int, Capture>()
-    private val entries = Channel<Entry>(32, BufferOverflow.DROP_OLDEST)
+    private val entries = Channel<Entry>(Channel.UNLIMITED)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
@@ -35,7 +36,6 @@ object TranscriptLogger {
                     val dir = File(entry.context.noBackupFilesDir, "transcripts").apply { mkdirs() }
                     val file = File(dir, "session-${entry.id}.log")
                     file.appendText(entry.text)
-                    if (file.length() > MAX_LOG_BYTES) file.writeText(file.readText().takeLast(64 * 1024))
                 }.onFailure {
                     Log.w("PocketShell.Transcript", "Could not save local debug history (${it.javaClass.simpleName})")
                 }

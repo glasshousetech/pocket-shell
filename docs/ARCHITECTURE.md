@@ -65,13 +65,17 @@ normal keyboard Enter behavior; use the reviewed editor when you need to inspect
 
 ## Rendering, storage and performance
 
-PTY output enters a bounded incoming queue, then the main thread parses VT/xterm control
-sequences and updates the terminal screen. Drawing follows Android's view scheduling. The
-current terminal retains up to 20,000 scrollback rows and preserves a history anchor while
-new output arrives.
+PTY output enters a 64 KiB incoming queue; the main thread drains it in time-boxed batches
+(one wakeup at a time, one screen update per batch), parses VT/xterm control sequences and
+updates the terminal screen. Drawing follows Android's view scheduling. Keystrokes reach the PTY
+as they are typed (see `term/README.md`).
 
-Session snapshots take at most the last 128 rows / 8,000 characters, rather than materializing
-all scrollback. Immutable snapshots are written by one background writer using an atomic file.
+Each tab keeps its newest 20,000 scrollback rows in memory for instant scrolling; rows are
+allocated as they are used. Every row that becomes scrollback is also appended exactly once to
+`noBackupFiles/history/<tabId>.log` by `SessionHistory` on a background writer, with no line
+limit. That file is searched by Find in output and replayed (newest 5,000 lines) after a process
+kill. Session snapshots hold only tab structure plus the screen rows not yet in that file, written
+by one background writer using an atomic file; identical snapshots are not rewritten.
 Save and clear operations are ordered so an old save cannot resurrect deliberately cleared
 history. Persistence remains best-effort if Android kills the process before pending IO completes.
 

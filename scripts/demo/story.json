@@ -1,0 +1,38 @@
+{
+  "voice": "en-US-AndrewMultilingualNeural",
+  "narrator": "Microsoft Andrew (neural)",
+  "rate": "-5%",
+  "beats": [
+    {
+      "id": "terminal",
+      "title": "Open everyday tools",
+      "narration": "PocketShell keeps your terminal central. Actions brings the everyday tools within reach."
+    },
+    {
+      "id": "saved",
+      "title": "Save a reusable command",
+      "narration": "Save a command once. Named fields let you reuse it with fresh values."
+    },
+    {
+      "id": "preview",
+      "title": "Review before running",
+      "narration": "The preview shows the exact command. Insert types it. You choose when to run it."
+    },
+    {
+      "id": "result",
+      "title": "Read the actual result",
+      "narration": "The shell prints the message literally, including the apostrophe and the dollar expression."
+    },
+    {
+      "id": "search",
+      "title": "Find and copy output",
+      "narration": "Search finds retained output. Move between matches and copy the line you need."
+    },
+    {
+      "id": "empty",
+      "title": "Keep the terminal untouched",
+      "narration": "No match? You get a clear empty result, and your terminal stays untouched."
+    }
+  ],
+  "nativeTests": "OK (3 tests)"
+}

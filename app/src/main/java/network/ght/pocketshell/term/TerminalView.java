@@ -62,6 +62,24 @@ public class TerminalView extends View {
 
     public TerminalViewClient mClient;
     private int mInputGeneration;
+    /**
+     * Pocket Shell: what the current keyboard connection has already delivered to the PTY, i.e.
+     * the shell's copy of the keyboard's word in progress. See {@link ImeConnection}.
+     */
+    private String mImeMirror = "";
+    /** Pocket Shell: the live keyboard connection, flushed and reset at non-keyboard keys. */
+    private ImeConnection mImeInput;
+    /** Pocket Shell: true while keyboard text is being written, so its own keys are not word boundaries. */
+    private boolean mImeSyncInProgress;
+    /** Pocket Shell: accessibility text is refreshed at most once per interval, not per output chunk. */
+    private static final long ACCESSIBILITY_UPDATE_DELAY_MS = 100;
+    private boolean mAccessibilityUpdatePosted;
+    private final Runnable mAccessibilityUpdate = () -> {
+        mAccessibilityUpdatePosted = false;
+        if (mEmulator == null) return;
+        CharSequence text = getText();
+        if (!TextUtils.equals(text, getContentDescription())) setContentDescription(text);
+    };
 
     private TextSelectionCursorController mTextSelectionCursorController;
 
@@ -235,13 +253,12 @@ public class TerminalView extends View {
     }
 
     /**
-     * Pocket Shell addition. Tear down and re-create the IME connection so a changed
-     * {@link TerminalViewClient#shouldAllowFullImeFeatures()} takes effect on the keyboard that is
-     * already on screen, rather than only on the next one.
+     * Re-create the IME connection and invalidate callbacks from the previous editor.
      */
     public void refreshImeConfiguration() {
         mInputGeneration++;
-        mClient.onImeCompositionChanged("");
+        mImeMirror = "";
+        mImeInput = null;
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.restartInput(this);
     }
@@ -264,8 +281,13 @@ public class TerminalView extends View {
      */
     public boolean attachSession(TerminalSession session) {
         if (session == mTermSession) return false;
+        // Pocket Shell: the keyboard's connection belongs to the previous session and is now
+        // stale. Make the keyboard bind a fresh one; otherwise every later keystroke is rejected
+        // until something else happens to move focus.
+        boolean rebindKeyboard = hasFocus();
         mInputGeneration++;
-        mClient.onImeCompositionChanged("");
+        mImeMirror = "";
+        mImeInput = null;
         mTopRow = 0;
 
         mTermSession = session;
@@ -277,313 +299,362 @@ public class TerminalView extends View {
         // Wait with enabling the scrollbar until we have a terminal to get scroll position from.
         setVerticalScrollBarEnabled(true);
 
+        if (rebindKeyboard) {
+            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.restartInput(this);
+        }
         return true;
     }
 
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
-        // Ensure that inputType is only set if TerminalView is selected view with the keyboard and
-        // an alternate view is not selected, like an EditText. This is necessary if an activity is
-        // initially started with the alternate view or if activity is returned to from another app
-        // and the alternate view was the one selected the last time.
-        if (mClient.isTerminalViewSelected()) {
-            if (mClient.shouldAllowFullImeFeatures()) {
-                // Pocket Shell change. Upstream Termux declares either TYPE_NULL or a
-                // visible-password field so the IME never autocorrects terminal input. Every
-                // major Android keyboard (Microsoft SwiftKey, Gboard, Samsung) reads those as
-                // "not a real/sensitive text field" and hides its entire toolbar row — the row
-                // that carries voice typing, the clipboard, emoji and settings. Declaring a real
-                // text field with TYPE_TEXT_FLAG_NO_SUGGESTIONS keeps that row (voice-to-text
-                // included) while still switching predictive text and autocorrect off, which is
-                // what actually mattered for terminal input.
-                //
-                // MULTI_LINE is what keeps the Enter key an Enter key. Without it a single-line
-                // text field makes keyboards render an action key ("Done") that fires
-                // performEditorAction() instead of committing a newline, and nothing would run at
-                // the prompt. With it the keyboard commits "\n", which sendTextToTerminal() below
-                // already translates to the carriage return a shell expects. No CAP_* flag is set,
-                // so commands are never auto-capitalised.
-                outAttrs.inputType = InputType.TYPE_CLASS_TEXT
-                    | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                    | InputType.TYPE_TEXT_FLAG_MULTI_LINE;
-            } else if (mClient.shouldEnforceCharBasedInput()) {
-                // Some keyboards seems do not reset the internal state on TYPE_NULL.
-                // Affects mostly Samsung stock keyboards.
-                // https://github.com/termux/termux-app/issues/686
-                // However, this is not a valid value as per AOSP since `InputType.TYPE_CLASS_*` is
-                // not set and it logs a warning:
-                // W/InputAttributes: Unexpected input class: inputType=0x00080090 imeOptions=0x02000000
-                // https://cs.android.com/android/platform/superproject/+/android-11.0.0_r40:packages/inputmethods/LatinIME/java/src/com/android/inputmethod/latin/InputAttributes.java;l=79
-                outAttrs.inputType = InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
-            } else {
-                // Using InputType.NULL is the most correct input type and avoids issues with other hacks.
-                //
-                // Previous keyboard issues:
-                // https://github.com/termux/termux-packages/issues/25
-                // https://github.com/termux/termux-app/issues/87.
-                // https://github.com/termux/termux-app/issues/126.
-                // https://github.com/termux/termux-app/issues/137 (japanese chars and TYPE_NULL).
-                outAttrs.inputType = InputType.TYPE_NULL;
-            }
-        } else {
-            // Corresponds to android:inputType="text"
-            outAttrs.inputType =  InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL;
+        // Commands are normal text: keep voice/clipboard available without requesting
+        // incognito mode. A single-line IME contract prevents SwiftKey's automatic
+        // first-letter capitalization; action keys are handled explicitly below.
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
+            | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_ENTER_ACTION;
+        outAttrs.initialCapsMode = 0;
+        outAttrs.initialSelStart = outAttrs.initialSelEnd = 0;
+        mImeMirror = "";
+        ImeConnection connection = new ImeConnection(mTermSession, ++mInputGeneration);
+        mImeInput = connection;
+        return connection;
+    }
+
+    /**
+     * Pocket Shell: a key that did not come from the keyboard's text (Tab, arrows, Esc, Enter,
+     * Ctrl/Alt combinations, the extra-keys row, a hardware key) edits the shell line directly.
+     * Deliver anything still pending from the keyboard first, then start the keyboard on a fresh
+     * word so a later correction can never reach back across that key.
+     */
+    public void closeImeWord() {
+        if (mImeSyncInProgress) return;
+        ImeConnection input = mImeInput;
+        if (input == null || !input.isCurrent()) return;
+        if (input.getEditable().length() == 0 && mImeMirror.isEmpty()) return;
+        input.sync();
+        refreshImeConfiguration();
+    }
+
+    /**
+     * Pocket Shell: a terminal has no document for the keyboard to edit, so this connection keeps
+     * a small local editable (the word or dictation phrase in progress) and mirrors every change
+     * of it to the PTY immediately. What the keyboard shows is what the shell has: typing appears
+     * at the prompt as it happens, Tab completion and single-key prompts see every letter, and a
+     * keyboard correction arrives as ordinary DEL keys followed by the replacement text. Once
+     * everything in the editable is committed it is emptied, so it never grows past one word.
+     */
+    private final class ImeConnection extends BaseInputConnection {
+        private final TerminalSession inputSession;
+        private final int inputGeneration;
+        private int batchDepth;
+        private boolean selectionUpdatePosted;
+
+        ImeConnection(TerminalSession session, int generation) {
+            super(TerminalView.this, true);
+            inputSession = session;
+            inputGeneration = generation;
         }
 
-        // Note that IME_ACTION_NONE cannot be used as that makes it impossible to input newlines using the on-screen
-        // keyboard on Android TV (see https://github.com/termux/termux-app/issues/221).
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
+        boolean isCurrent() {
+            return inputSession != null && inputSession == mTermSession
+                && inputGeneration == mInputGeneration;
+        }
 
-        // Pocket Shell change. A real text field means the keyboard would otherwise add whatever
-        // is typed at a shell prompt — hostnames, tokens, passwords echoed by mistake — to its
-        // personal dictionary and cloud sync. Opt out of that learning entirely.
-        outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING;
-        outAttrs.initialSelStart = outAttrs.initialSelEnd = 0;
-        final TerminalSession inputSession = mTermSession;
-        final int inputGeneration = ++mInputGeneration;
-        mClient.onImeCompositionChanged("");
+        @Override public int getCursorCapsMode(int reqModes) { return 0; }
 
-        return new BaseInputConnection(this, true) {
-            private int batchDepth;
-            private boolean selectionUpdatePosted;
+        @Override public boolean performEditorAction(int actionCode) {
+            if (!isCurrent()) return false;
+            if (actionCode != EditorInfo.IME_ACTION_UNSPECIFIED
+                    && actionCode != EditorInfo.IME_ACTION_NONE
+                    && actionCode != EditorInfo.IME_ACTION_DONE
+                    && actionCode != EditorInfo.IME_ACTION_GO
+                    && actionCode != EditorInfo.IME_ACTION_SEND) return false;
+            if (!finishComposingText()) return false;
+            boolean accepted = sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+            sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+            return accepted;
+        }
 
-            private boolean isCurrent() {
-                return inputSession != null && inputSession == mTermSession
-                    && inputGeneration == mInputGeneration;
-            }
-
-            private void notifyIme() {
+        /** Report the editor state the keyboard needs, once per message-loop turn. */
+        private void notifyIme() {
+            if (!isCurrent() || batchDepth != 0 || selectionUpdatePosted) return;
+            selectionUpdatePosted = true;
+            post(() -> {
+                selectionUpdatePosted = false;
                 if (!isCurrent() || batchDepth != 0) return;
-                Editable content = getEditable();
-                mClient.onImeCompositionChanged(content.subSequence(Math.max(0, content.length() - 512), content.length()).toString());
-                if (!selectionUpdatePosted) {
-                    selectionUpdatePosted = true;
-                    post(() -> {
-                        selectionUpdatePosted = false;
-                        if (!isCurrent() || batchDepth != 0) return;
-                        Editable current = getEditable();
-                        InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-                        if (imm != null) imm.updateSelection(TerminalView.this,
-                            Selection.getSelectionStart(current), Selection.getSelectionEnd(current),
-                            getComposingSpanStart(current), getComposingSpanEnd(current));
-                    });
+                Editable current = getEditable();
+                InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) imm.updateSelection(TerminalView.this,
+                    Selection.getSelectionStart(current), Selection.getSelectionEnd(current),
+                    getComposingSpanStart(current), getComposingSpanEnd(current));
+            });
+        }
+
+        /**
+         * Send the difference between the editable and what the PTY already received: one DEL per
+         * code point after their common prefix, then the new remainder. The shell cursor sits at
+         * the end of the mirrored text, so this reproduces any keyboard edit, including a
+         * correction in the middle of the word.
+         */
+        boolean sync() {
+            if (!isCurrent() || mEmulator == null) return false;
+            String current = getEditable().toString();
+            String sent = mImeMirror;
+            if (current.equals(sent)) return true;
+            int prefix = 0;
+            int limit = Math.min(current.length(), sent.length());
+            while (prefix < limit && current.charAt(prefix) == sent.charAt(prefix)) prefix++;
+            // Never split a surrogate pair between "kept" and "replaced".
+            if (prefix > 0 && Character.isHighSurrogate(current.charAt(prefix - 1))) prefix--;
+            int deletions = Character.codePointCount(sent, prefix, sent.length());
+            String insertion = current.substring(prefix);
+            boolean modifierPending = !insertion.isEmpty() && (mClient.readControlKey()
+                || mClient.readAltKey() || mClient.readShiftKey() || mClient.readFnKey());
+            boolean previous = mImeSyncInProgress;
+            mImeSyncInProgress = true;
+            boolean accepted;
+            inputSession.beginInputBatch();
+            try {
+                for (int i = 0; i < deletions; i++) handleKeyCode(KeyEvent.KEYCODE_DEL, 0);
+                if (!insertion.isEmpty()) sendTextToTerminal(insertion);
+            } finally {
+                accepted = inputSession.endInputBatch();
+                mImeSyncInProgress = previous;
+            }
+            if (accepted) mImeMirror = current;
+            // A one-shot Ctrl/Alt/Shift turned the first character into something other than
+            // the text the keyboard holds, so it must not be "corrected" later. Start a new word.
+            if (accepted && modifierPending) post(TerminalView.this::closeImeWord);
+            return accepted;
+        }
+
+        /** Deliver the edit unless the keyboard is still inside a batch; drop committed text. */
+        private boolean afterEdit() {
+            if (!isCurrent()) return false;
+            if (batchDepth != 0) return true;
+            boolean accepted = sync();
+            Editable content = getEditable();
+            if (accepted && content.length() > 0 && getComposingSpanStart(content) < 0) {
+                // Everything the keyboard holds is committed and already in the shell.
+                content.clear();
+                content.clearSpans();
+                Selection.setSelection(content, 0);
+                mImeMirror = "";
+            }
+            notifyIme();
+            return accepted;
+        }
+
+        @Override public boolean beginBatchEdit() { batchDepth++; return true; }
+        @Override public boolean endBatchEdit() {
+            if (batchDepth > 0) batchDepth--;
+            if (batchDepth == 0) afterEdit();
+            return batchDepth > 0;
+        }
+
+        @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
+            if (!isCurrent()) return false;
+            if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)
+                mClient.logInfo(LOG_TAG, "IME: setComposingText(length=" + text.length() + ")");
+            super.setComposingText(text, newCursorPosition);
+            return afterEdit();
+        }
+
+        @Override public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
+            if (!isCurrent()) return null;
+            ExtractedText result = new ExtractedText();
+            Editable content = getEditable();
+            result.text = content.toString();
+            result.startOffset = 0;
+            result.partialStartOffset = result.partialEndOffset = -1;
+            result.selectionStart = Selection.getSelectionStart(content);
+            result.selectionEnd = Selection.getSelectionEnd(content);
+            return result;
+        }
+
+        @Override public void closeConnection() {
+            // Text the keyboard already delivered stays in the shell; nothing is pending here.
+            if (isCurrent()) {
+                mInputGeneration++;
+                mImeMirror = "";
+                mImeInput = null;
+            }
+            getEditable().clear();
+            getEditable().clearSpans();
+            super.closeConnection();
+        }
+
+        @Override public boolean sendKeyEvent(KeyEvent event) {
+            if (!isCurrent()) return false;
+            int keyCode = event.getKeyCode();
+            Editable draft = getEditable();
+            if (event.getAction() == KeyEvent.ACTION_DOWN && draft.length() > 0
+                    && !event.isCtrlPressed() && !event.isAltPressed() && !event.isMetaPressed()
+                    && (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) {
+                // Keyboards may send backspace as a key event instead of deleteSurroundingText.
+                // Edit the keyboard's word so its view and the shell stay identical.
+                int start = Selection.getSelectionStart(draft);
+                int end = Selection.getSelectionEnd(draft);
+                if (start >= 0 && end >= 0 && start != end) {
+                    int first = Math.min(start, end);
+                    draft.delete(first, Math.max(start, end));
+                    Selection.setSelection(draft, first);
+                    afterEdit();
+                    return true;
                 }
+                return keyCode == KeyEvent.KEYCODE_DEL
+                    ? deleteSurroundingTextInCodePoints(1, 0)
+                    : deleteSurroundingTextInCodePoints(0, 1);
             }
+            // Keep IME key events session-scoped instead of posting them to whichever
+            // Android editor happens to have focus when a later dispatch runs.
+            if (event.getAction() == KeyEvent.ACTION_DOWN)
+                return TerminalView.this.onKeyDown(event.getKeyCode(), event);
+            if (event.getAction() == KeyEvent.ACTION_UP)
+                return TerminalView.this.onKeyUp(event.getKeyCode(), event);
+            return false;
+        }
 
-            @Override public boolean beginBatchEdit() { batchDepth++; return true; }
-            @Override public boolean endBatchEdit() {
-                if (batchDepth > 0) batchDepth--;
-                notifyIme();
-                return batchDepth > 0;
+        @Override
+        public boolean finishComposingText() {
+            if (!isCurrent()) return false;
+            if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
+            super.finishComposingText();
+            return afterEdit();
+        }
+
+        @Override
+        public boolean commitText(CharSequence text, int newCursorPosition) {
+            if (!isCurrent()) return false;
+            if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
+                mClient.logInfo(LOG_TAG, "IME: commitText(length=" + text.length() + ", " + newCursorPosition + ")");
             }
-
-            @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
-                if (!isCurrent()) return false;
-                boolean result = super.setComposingText(text, newCursorPosition);
-                notifyIme();
-                return result;
-            }
-
-            @Override public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
-                if (!isCurrent()) return null;
-                ExtractedText result = new ExtractedText();
-                Editable content = getEditable();
-                result.text = content.toString();
-                result.startOffset = 0;
-                result.partialStartOffset = result.partialEndOffset = -1;
-                result.selectionStart = Selection.getSelectionStart(content);
-                result.selectionEnd = Selection.getSelectionEnd(content);
-                return result;
-            }
-
-            @Override public void closeConnection() {
-                // A closing editor must not submit provisional speech, especially after a tab switch.
-                if (isCurrent()) {
-                    mInputGeneration++;
-                    mClient.onImeCompositionChanged("");
-                }
-                getEditable().clear();
-                getEditable().clearSpans();
-                // Invalidate and clear first: BaseInputConnection closes composition too.
-                // Its finish callback must not submit a closing editor's draft.
-                super.closeConnection();
-            }
-
-            @Override public boolean sendKeyEvent(KeyEvent event) {
-                if (!isCurrent()) return false;
-                int keyCode = event.getKeyCode();
-                Editable draft = getEditable();
-                if (event.getAction() == KeyEvent.ACTION_DOWN && draft.length() > 0
-                        && !event.isCtrlPressed() && !event.isAltPressed() && !event.isMetaPressed()
-                        && (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) {
-                    // IMEs may send delete as a key event instead of deleteSurroundingText.
-                    // Edit the same provisional buffer first; sending it straight to the
-                    // shell leaves the visible word unchanged and deletes unrelated input.
-                    int start = Selection.getSelectionStart(draft);
-                    int end = Selection.getSelectionEnd(draft);
-                    if (start >= 0 && end >= 0 && start != end) {
-                        int first = Math.min(start, end);
-                        draft.delete(first, Math.max(start, end));
-                        Selection.setSelection(draft, first);
-                        notifyIme();
-                        return true;
-                    }
-                    return keyCode == KeyEvent.KEYCODE_DEL
-                        ? deleteSurroundingTextInCodePoints(1, 0)
-                        : deleteSurroundingTextInCodePoints(0, 1);
-                }
-                // Keep IME key events session-scoped instead of posting them to whichever
-                // Android editor happens to have focus when a later dispatch runs.
-                if (event.getAction() == KeyEvent.ACTION_DOWN)
-                    return TerminalView.this.onKeyDown(event.getKeyCode(), event);
-                if (event.getAction() == KeyEvent.ACTION_UP)
-                    return TerminalView.this.onKeyUp(event.getKeyCode(), event);
-                return false;
-            }
-
-            @Override
-            public boolean finishComposingText() {
-                if (!isCurrent()) return false;
-                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
-                super.finishComposingText();
-
-                boolean accepted = sendTextToTerminal(getEditable());
-                if (accepted) getEditable().clear();
+            Editable existing = getEditable();
+            if (batchDepth == 0 && existing.length() == 0 && mImeMirror.isEmpty()) {
+                // The ordinary case (a keypress, a clipboard chip, a finished phrase): nothing is
+                // pending, so the text goes straight to the shell without a styled buffer.
+                boolean accepted = sendTextToTerminal(text);
+                if (!accepted) super.commitText(text, newCursorPosition); // retained, not lost
                 notifyIme();
                 return accepted;
             }
+            super.commitText(text, newCursorPosition);
+            return afterEdit();
+        }
 
-            @Override
-            public boolean commitText(CharSequence text, int newCursorPosition) {
-                if (!isCurrent()) return false;
-                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
-                    mClient.logInfo(LOG_TAG, "IME: commitText(\"" + text + "\", " + newCursorPosition + ")");
-                }
-                Editable existing = getEditable();
-                if (existing.length() == 0 || (getComposingSpanStart(existing) == 0
-                        && getComposingSpanEnd(existing) == existing.length())) {
-                    // This terminal consumes final text; building and immediately clearing a
-                    // large styled editor buffer is unnecessary for the ordinary commit case.
-                    boolean accepted = sendTextToTerminal(text);
-                    if (accepted) { existing.clear(); existing.clearSpans(); Selection.setSelection(existing, 0); }
-                    else super.commitText(text, newCursorPosition); // retain rejected text for recovery
-                    notifyIme();
-                    return accepted;
-                }
-                super.commitText(text, newCursorPosition);
-
-                if (mEmulator == null) return false;
-
-                Editable content = getEditable();
-                boolean accepted = sendTextToTerminal(content);
-                if (accepted) content.clear();
-                notifyIme();
-                return accepted;
+        @Override
+        public boolean deleteSurroundingText(int leftLength, int rightLength) {
+            if (!isCurrent() || leftLength < 0 || rightLength < 0) return false;
+            if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
+                mClient.logInfo(LOG_TAG, "IME: deleteSurroundingText(" + leftLength + ", " + rightLength + ")");
             }
-
-            @Override
-            public boolean deleteSurroundingText(int leftLength, int rightLength) {
-                if (!isCurrent() || leftLength < 0 || rightLength < 0) return false;
-                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
-                    mClient.logInfo(LOG_TAG, "IME: deleteSurroundingText(" + leftLength + ", " + rightLength + ")");
-                }
-                Editable content = getEditable();
-                int start = Math.max(0, Math.min(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
-                int end = Math.max(start, Math.max(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
-                int localLeft = Math.min(leftLength, start);
-                int localRight = Math.min(rightLength, content.length() - end);
-                // BaseInputConnection deliberately protects the composing span from
-                // deleteSurroundingText. A dictation correction must edit that local span.
-                if (localRight > 0) content.delete(end, end + localRight);
-                if (localLeft > 0) content.delete(start - localLeft, start);
-                // Provisional speech edits only its local buffer; committed text uses terminal keys.
+            Editable content = getEditable();
+            int start = Math.max(0, Math.min(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+            int end = Math.max(start, Math.max(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+            int localLeft = Math.min(leftLength, start);
+            int localRight = Math.min(rightLength, content.length() - end);
+            // BaseInputConnection deliberately protects the composing span from
+            // deleteSurroundingText. A correction in the current word must edit that span.
+            if (localRight > 0) content.delete(end, end + localRight);
+            if (localLeft > 0) content.delete(start - localLeft, start);
+            // Anything beyond the keyboard's word is earlier shell text: plain DEL keys. They are
+            // part of this keyboard edit, not a new word boundary.
+            boolean previous = mImeSyncInProgress;
+            mImeSyncInProgress = true;
+            try {
                 for (int i = localLeft; i < leftLength; i++)
                     TerminalView.this.onKeyDown(KeyEvent.KEYCODE_DEL, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
                 for (int i = localRight; i < rightLength; i++)
                     TerminalView.this.onKeyDown(KeyEvent.KEYCODE_FORWARD_DEL, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL));
-                notifyIme();
-                return true;
+            } finally {
+                mImeSyncInProgress = previous;
             }
+            afterEdit();
+            return true;
+        }
 
-            @Override public boolean deleteSurroundingTextInCodePoints(int left, int right) {
-                if (!isCurrent() || left < 0 || right < 0) return false;
-                Editable content = getEditable();
-                int start = Math.max(0, Math.min(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
-                int end = Math.max(start, Math.max(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
-                int localLeft = Math.min(left, Character.codePointCount(content, 0, start));
-                int localRight = Math.min(right, Character.codePointCount(content, end, content.length()));
-                return deleteSurroundingText(start - Character.offsetByCodePoints(content, start, -localLeft) + left - localLeft,
-                    Character.offsetByCodePoints(content, end, localRight) - end + right - localRight);
-            }
+        @Override public boolean deleteSurroundingTextInCodePoints(int left, int right) {
+            if (!isCurrent() || left < 0 || right < 0) return false;
+            Editable content = getEditable();
+            int start = Math.max(0, Math.min(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+            int end = Math.max(start, Math.max(Selection.getSelectionStart(content), Selection.getSelectionEnd(content)));
+            int localLeft = Math.min(left, Character.codePointCount(content, 0, start));
+            int localRight = Math.min(right, Character.codePointCount(content, end, content.length()));
+            return deleteSurroundingText(start - Character.offsetByCodePoints(content, start, -localLeft) + left - localLeft,
+                Character.offsetByCodePoints(content, end, localRight) - end + right - localRight);
+        }
 
-            boolean sendTextToTerminal(CharSequence text) {
-                if (!isCurrent() || mEmulator == null) return false;
-                stopTextSelectionMode();
-                inputSession.beginInputBatch();
-                boolean accepted;
-                try {
-                final int textLengthInChars = text.length();
-                for (int i = 0; i < textLengthInChars; i++) {
-                    // Pocket Shell: encode ordinary dictation once. A one-shot modifier uses
-                    // the original first-code-point path, then the remainder can be batched.
-                    if (mClient.onTextInput(text.subSequence(i, textLengthInChars), inputSession)) break;
-                    char firstChar = text.charAt(i);
-                    int codePoint;
-                    if (Character.isHighSurrogate(firstChar)) {
-                        if (i + 1 < textLengthInChars && Character.isLowSurrogate(text.charAt(i + 1))) {
-                            codePoint = Character.toCodePoint(firstChar, text.charAt(++i));
-                        } else {
-                            // At end of string, with no low surrogate following the high:
-                            codePoint = TerminalEmulator.UNICODE_REPLACEMENT_CHAR;
-                        }
+        boolean sendTextToTerminal(CharSequence text) {
+            if (!isCurrent() || mEmulator == null) return false;
+            stopTextSelectionMode();
+            boolean previous = mImeSyncInProgress;
+            mImeSyncInProgress = true;
+            inputSession.beginInputBatch();
+            boolean accepted;
+            try {
+            final int textLengthInChars = text.length();
+            for (int i = 0; i < textLengthInChars; i++) {
+                // Pocket Shell: encode ordinary text once. A one-shot modifier uses
+                // the original first-code-point path, then the remainder can be batched.
+                if (mClient.onTextInput(text.subSequence(i, textLengthInChars), inputSession)) break;
+                char firstChar = text.charAt(i);
+                int codePoint;
+                if (Character.isHighSurrogate(firstChar)) {
+                    if (i + 1 < textLengthInChars && Character.isLowSurrogate(text.charAt(i + 1))) {
+                        codePoint = Character.toCodePoint(firstChar, text.charAt(++i));
                     } else {
-                        codePoint = Character.isLowSurrogate(firstChar) ? TerminalEmulator.UNICODE_REPLACEMENT_CHAR : firstChar;
+                        // At end of string, with no low surrogate following the high:
+                        codePoint = TerminalEmulator.UNICODE_REPLACEMENT_CHAR;
+                    }
+                } else {
+                    codePoint = Character.isLowSurrogate(firstChar) ? TerminalEmulator.UNICODE_REPLACEMENT_CHAR : firstChar;
+                }
+
+                // Check onKeyDown() for details.
+                if (mClient.readShiftKey())
+                    codePoint = Character.toUpperCase(codePoint);
+
+                boolean ctrlHeld = false;
+                if (codePoint <= 31 && codePoint != 27) {
+                    if (codePoint == '\n') {
+                        // The AOSP keyboard and descendants seems to send \n as text when the enter key is pressed,
+                        // instead of a key event like most other keyboard apps. A terminal expects \r for the enter
+                        // key (although when icrnl is enabled this doesn't make a difference - run 'stty -icrnl' to
+                        // check the behaviour).
+                        codePoint = '\r';
                     }
 
-                    // Check onKeyDown() for details.
-                    if (mClient.readShiftKey())
-                        codePoint = Character.toUpperCase(codePoint);
-
-                    boolean ctrlHeld = false;
-                    if (codePoint <= 31 && codePoint != 27) {
-                        if (codePoint == '\n') {
-                            // The AOSP keyboard and descendants seems to send \n as text when the enter key is pressed,
-                            // instead of a key event like most other keyboard apps. A terminal expects \r for the enter
-                            // key (although when icrnl is enabled this doesn't make a difference - run 'stty -icrnl' to
-                            // check the behaviour).
-                            codePoint = '\r';
-                        }
-
-                        // E.g. penti keyboard for ctrl input.
-                        ctrlHeld = true;
-                        switch (codePoint) {
-                            case 31:
-                                codePoint = '_';
-                                break;
-                            case 30:
-                                codePoint = '^';
-                                break;
-                            case 29:
-                                codePoint = ']';
-                                break;
-                            case 28:
-                                codePoint = '\\';
-                                break;
-                            default:
-                                codePoint += 96;
-                                break;
-                        }
+                    // E.g. penti keyboard for ctrl input.
+                    ctrlHeld = true;
+                    switch (codePoint) {
+                        case 31:
+                            codePoint = '_';
+                            break;
+                        case 30:
+                            codePoint = '^';
+                            break;
+                        case 29:
+                            codePoint = ']';
+                            break;
+                        case 28:
+                            codePoint = '\\';
+                            break;
+                        default:
+                            codePoint += 96;
+                            break;
                     }
+                }
 
-                    inputCodePoint(codePoint, ctrlHeld, false);
-                }
-                } finally {
-                    accepted = inputSession.endInputBatch();
-                }
-                return accepted;
+                inputCodePoint(codePoint, ctrlHeld, false);
             }
-
-        };
+            } finally {
+                accepted = inputSession.endInputBatch();
+                mImeSyncInProgress = previous;
+            }
+            return accepted;
+        }
     }
 
     @Override
@@ -636,7 +707,10 @@ public class TerminalView extends View {
         mEmulator.clearScrollCounter();
 
         invalidate();
-        if (mAccessibilityEnabled) setContentDescription(getText());
+        if (mAccessibilityEnabled && !mAccessibilityUpdatePosted) {
+            mAccessibilityUpdatePosted = true;
+            postDelayed(mAccessibilityUpdate, ACCESSIBILITY_UPDATE_DELAY_MS);
+        }
     }
 
     /**
@@ -801,7 +875,7 @@ public class TerminalView extends View {
     /**
      * Key presses in software keyboards will generally NOT trigger this listener, although some
      * may elect to do so in some situations. Do not rely on this to catch software key presses.
-     * Gboard calls this when shouldEnforceCharBasedInput() is disabled (InputType.TYPE_NULL) instead
+     * Some keyboards call this for special keys instead
      * of calling commitText(), with deviceId=-1. However, Hacker's Keyboard, OpenBoard, LG Keyboard
      * call commitText().
      *
@@ -1027,6 +1101,7 @@ public class TerminalView extends View {
                     break;
             }
 
+            closeImeWord();
             // If left alt, send escape before the code point to make e.g. Alt+B and Alt+F work in readline:
             mTermSession.writeCodePoint(altDown, codePoint);
         }
@@ -1041,6 +1116,7 @@ public class TerminalView extends View {
         TerminalEmulator term = mTermSession.getEmulator();
         String code = KeyHandler.getCode(keyCode, keyMod, term.isCursorKeysApplicationMode(), term.isKeypadApplicationMode());
         if (code == null) return false;
+        closeImeWord();
         mTermSession.write(code);
         return true;
     }
@@ -1428,7 +1504,10 @@ public class TerminalView extends View {
     @Override
     protected void onDetachedFromWindow() {
         mInputGeneration++;
-        mClient.onImeCompositionChanged("");
+        mImeMirror = "";
+        mImeInput = null;
+        removeCallbacks(mAccessibilityUpdate);
+        mAccessibilityUpdatePosted = false;
         super.onDetachedFromWindow();
 
         if (mTextSelectionCursorController != null) {

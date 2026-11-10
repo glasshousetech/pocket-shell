@@ -151,7 +151,6 @@ fun SettingsDialog(
     initialBase: String,
     onSave: (String, String, String) -> Unit,
     onDismiss: () -> Unit,
-    onKeyboardModeChanged: () -> Unit = {},
     saveError: String? = null,
     saving: Boolean = false,
 ) {
@@ -164,7 +163,6 @@ fun SettingsDialog(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var transcriptLogging by remember { mutableStateOf(Secrets.transcriptLoggingEnabled(ctx)) }
-    var fullKeyboard by remember { mutableStateOf(KeyboardPrefs.fullImeFeatures(ctx)) }
     var lastCrash by remember { mutableStateOf(CrashHandler.lastCrash(ctx)) }
     var updateState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
     var storageGranted by remember { mutableStateOf(StorageAccess.isGranted(ctx)) }
@@ -321,24 +319,12 @@ fun SettingsDialog(
             }
             if (section == "Keyboard") {
             Text("Keyboard", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Switch(
-                    checked = fullKeyboard,
-                    onCheckedChange = {
-                        fullKeyboard = it
-                        KeyboardPrefs.setFullImeFeatures(ctx, it)
-                        onKeyboardModeChanged()
-                    },
-                    colors = SwitchDefaults.colors(checkedTrackColor = RailAccent, checkedThumbColor = RailPromptText),
-                )
-                Text(
-                    "Full keyboard features. Keeps your keyboard's own top row, so voice typing, " +
-                        "the clipboard, emoji and its settings stay reachable at the prompt. Autocorrect " +
-                        "and predictions stay off either way. Turn this off only if your keyboard starts " +
-                        "inserting or swallowing characters in the terminal.",
-                    color = RailDimText, fontFamily = RailMono, fontSize = 10.sp, lineHeight = 15.sp,
-                )
-            }
+            Text(
+                "Your keyboard’s voice, clipboard and composed input are available at the prompt. " +
+                    "PocketShell does not request incognito mode, automatic capitalization or command corrections. " +
+                    "Use Text / voice to review a command before inserting it.",
+                color = RailDimText, fontFamily = RailMono, fontSize = 12.sp, lineHeight = 18.sp,
+            )
 
             SettingsDivider()
 

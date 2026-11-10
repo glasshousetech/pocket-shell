@@ -11,7 +11,7 @@ class ExtraKeysLayoutsTest {
     fun defaultPresetIncludesModifiersAndNavigation() {
         assertEquals(
             listOf(
-                "esc", "tab", "ctrl", "alt", "shift",
+                "esc", "tab", "enter", "ctrl", "alt", "shift",
                 "left", "down", "up", "right",
                 "home", "end", "pgup", "pgdn", "del",
                 "dash", "underscore", "tilde", "slash", "pipe", "colon",
@@ -19,6 +19,24 @@ class ExtraKeysLayoutsTest {
             ),
             ExtraKeysLayouts.DEFAULT.keys.map { it.id },
         )
+    }
+
+    @Test
+    fun everyPresetHasEnterNextToTab() {
+        ExtraKeysLayouts.PRESETS.forEach { preset ->
+            val ids = preset.keys.map { it.id }
+            assertEquals(preset.id, ids.indexOf("tab") + 1, ids.indexOf("enter"))
+        }
+    }
+
+    @Test
+    fun customizedRowsGainEnterOnceInAPredictablePlace() {
+        val e = ExtraKeysLayouts
+        assertEquals(listOf("esc", "tab", "enter", "ctrl"), e.withEnter(listOf(e.ESC, e.TAB, e.CTRL)).map { it.id })
+        assertEquals(listOf("esc", "enter", "up"), e.withEnter(listOf(e.ESC, e.UP)).map { it.id })
+        assertEquals(listOf("enter", "up", "down"), e.withEnter(listOf(e.UP, e.DOWN)).map { it.id })
+        val already = listOf(e.UP, e.ENTER)
+        assertEquals(already, e.withEnter(already))
     }
 
     @Test
