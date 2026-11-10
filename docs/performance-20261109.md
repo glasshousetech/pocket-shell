@@ -123,6 +123,7 @@ Connor: "Do all the fixes first, deploy it."
   updater offers it.
 - Rollback: `/opt/halo-dl/pocketshell.apk.bak-0.5.4-*`, `pocketshell-latest.json.bak-0.5.4-*` and
   `/etc/caddy/Caddyfile.bak-pocketshell-0.6.0-*` on gh-cloud-01; the 0.5.4 immutable URL still serves.
-- Website: ght-network PR #96 removed Pocket Shell from the download hold and lists 0.6.0.
+- Website: ght-network PR #96 removed Pocket Shell from the download hold; storefront deploy run
+  42716400891 passed its quality gate, and ght.network/software/pocketshell shows Download for Android.
 - Not done: the Fold7 itself was not updated remotely (installing ends running sessions). Update
   from Settings → Check for updates, or the download link.
