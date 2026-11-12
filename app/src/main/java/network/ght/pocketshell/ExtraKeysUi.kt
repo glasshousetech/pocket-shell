@@ -35,12 +35,18 @@ fun ExtraKeysDialog(
     onDismiss: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss) {
+      // The settings scroll; Close stays pinned beneath them so it is reachable on a short screen.
+      Column(
+          modifier = Modifier
+              .clip(RoundedCornerShape(14.dp))
+              .background(RailSurface)
+              .padding(20.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
         Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(RailSurface)
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("Extra-Keys Row", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -73,12 +79,7 @@ fun ExtraKeysDialog(
             )
 
             Text("Customize", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 220.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 current.forEachIndexed { i, key ->
                     KeyEditRow(
                         key = key,
@@ -112,10 +113,11 @@ fun ExtraKeysDialog(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
-                TextButton(onClick = onDismiss) { Text("Close", color = RailAccentDim, fontFamily = RailMono) }
-            }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
+            TextButton(onClick = onDismiss) { Text("Close", color = RailAccentDim, fontFamily = RailMono) }
+        }
+      }
     }
 }
 

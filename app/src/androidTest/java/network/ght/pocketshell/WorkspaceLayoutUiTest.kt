@@ -48,8 +48,28 @@ class WorkspaceLayoutUiTest {
         ExtraKeysLayouts.savePreset(ctx, ExtraKeysLayouts.DEFAULT)
     }
 
-    private fun find(what: String, selector: androidx.test.uiautomator.BySelector, timeoutMs: Long = 8000): UiObject2 =
-        device.wait(Until.findObject(selector), timeoutMs) ?: throw AssertionError("$what is not on screen")
+    /** Reads from a clean accessibility cache; on API 34 a cached node can predate the last gesture. */
+    private fun find(what: String, selector: androidx.test.uiautomator.BySelector, timeoutMs: Long = 8000): UiObject2 {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            ToolbarRobot.refresh()
+            device.findObject(selector)?.let { found -> if (runCatching { found.visibleBounds }.isSuccess) return found }
+            if (System.currentTimeMillis() >= deadline) throw AssertionError("$what is not on screen")
+            Thread.sleep(60)
+        }
+    }
+
+    private fun gone(selector: androidx.test.uiautomator.BySelector, timeoutMs: Long = 4000): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            ToolbarRobot.refresh()
+            if (!device.hasObject(selector)) return true
+            Thread.sleep(60)
+        }
+        return false
+    }
+
+    private fun visible(selector: androidx.test.uiautomator.BySelector): Boolean { ToolbarRobot.refresh(); return device.hasObject(selector) }
 
     private fun waitFor(what: String, timeoutMs: Long = 6000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -80,11 +100,12 @@ class WorkspaceLayoutUiTest {
                 // tools are nowhere on screen until it is scrolled to its end.
                 find("ESC", By.text("ESC"))
                 listOf("History ↑", "History ↓", "Actions", "Text / voice").forEach {
-                    assertFalse("$it no longer sits in a fixed row", device.hasObject(By.text(it)))
+                    assertFalse("$it no longer sits in a fixed row", visible(By.text(it)))
                 }
                 shot("toolbar-start-phone.png")
 
                 val textVoice = ToolbarRobot.tool(device, "Text / voice")
+                ToolbarRobot.refresh()
                 val order = listOf("History ↑", "History ↓", "Live", "Actions", "Text / voice")
                     .mapNotNull { label -> device.findObject(By.text(label))?.visibleCenter?.x?.let { label to it } }
                 assertTrue("Several tools are visible together at the end of the row: $order", order.size >= 2)
@@ -92,19 +113,19 @@ class WorkspaceLayoutUiTest {
                 assertEquals("Text / voice is the last key", "Text / voice", order.last().first)
                 val row = find("the key row", By.desc(ToolbarRobot.ROW))
                 assertNotNull(row)
-                assertTrue(device.hasObject(By.text("Text / voice")))
+                assertTrue(visible(By.text("Text / voice")))
                 shot("toolbar-tools-at-end-phone.png")
                 assertNotNull(textVoice)
 
                 // Folding the toolbar is remembered, and the tools come back with it.
                 find("the handle", By.desc(ToolbarRobot.HANDLE)).click()
-                assertTrue(device.wait(Until.gone(By.desc(ToolbarRobot.ROW)), 4000))
+                assertTrue(gone(By.desc(ToolbarRobot.ROW)))
                 assertFalse(WorkspacePrefs.toolbarOpen(ctx))
                 shot("toolbar-folded-phone.png")
                 activity.recreate()
                 assertTrue(ToolbarRobot.workspaceReady(device))
                 hideKeyboard(activity)
-                assertFalse("The toolbar stays folded after recreation", device.hasObject(By.desc(ToolbarRobot.ROW)))
+                assertFalse("The toolbar stays folded after recreation", visible(By.desc(ToolbarRobot.ROW)))
                 ToolbarRobot.click(device, "Actions")
                 assertTrue(WorkspacePrefs.toolbarOpen(ctx))
                 find("the Actions panel", By.text("Saved commands"))
@@ -162,7 +183,7 @@ class WorkspaceLayoutUiTest {
 
                 // Collapsing swaps the grip for the slim rail; expanding restores the chosen width.
                 find("collapse", By.desc("Collapse workspace menu")).click()
-                assertTrue(device.wait(Until.gone(By.desc("Resize workspace menu")), 4000))
+                assertTrue(gone(By.desc("Resize workspace menu")))
                 find("expand", By.desc("Expand workspace menu")).click()
                 assertWidth(840 - WorkspacePrefs.TERMINAL_MIN_DP, "after collapse and expand")
 
@@ -170,8 +191,7 @@ class WorkspaceLayoutUiTest {
                 find("Settings", By.desc("Settings")).click()
                 find("Appearance", By.text("Appearance")).click()
                 val reset = By.text("Reset layout sizes")
-                repeat(6) { if (!device.hasObject(reset)) device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.8f) }
-                assertTrue(device.hasObject(By.textStartsWith("Workspace menu width: ${840 - WorkspacePrefs.TERMINAL_MIN_DP} dp")) || device.hasObject(reset))
+                repeat(8) { if (!visible(reset)) { device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f); device.waitForIdle() } }
                 find("Reset layout sizes", reset).click()
                 waitFor("reset saved") { WorkspacePrefs.sidebarWidth(ctx) == WorkspacePrefs.SIDEBAR_DEFAULT_DP }
                 device.pressBack()
@@ -212,7 +232,7 @@ class WorkspaceLayoutUiTest {
                 val larger = WorkspacePrefs.toolbarKeySize(ctx)
                 assertTrue("A 40 dp pull enlarges the keys by about that much: $larger", larger in 66..90)
                 assertKeys(larger, "after dragging")
-                assertTrue("The toolbar is still open after a drag", device.hasObject(By.desc(ToolbarRobot.ROW)))
+                assertTrue("The toolbar is still open after a drag", visible(By.desc(ToolbarRobot.ROW)))
                 shot("toolbar-keys-larger-phone.png")
                 activity.recreate()
                 assertTrue(ToolbarRobot.workspaceReady(device))
@@ -221,10 +241,13 @@ class WorkspaceLayoutUiTest {
 
                 // The same size is adjustable from the keys dialog, in fixed steps.
                 find("the handle", By.desc(ToolbarRobot.HANDLE)).longClick()
+                // On a short screen the size controls start below the presets; Close stays pinned.
+                val smaller = By.text("Smaller keys")
+                repeat(8) { if (!visible(smaller)) { device.findObject(By.scrollable(true))?.scroll(Direction.DOWN, 0.6f); device.waitForIdle() } }
                 find("the keys dialog", By.textStartsWith("Key size: $larger dp"))
-                find("Smaller keys", By.text("Smaller keys")).click()
+                find("Smaller keys", smaller).click()
                 find("the updated size", By.textStartsWith("Key size: ${larger - 4} dp"))
-                find("Close", By.text("Close")).click()
+                find("Close, pinned below the scrolling settings", By.text("Close")).click()
                 assertKeys(larger - 4, "after Smaller keys")
 
                 // A long pull stops at the largest size instead of swallowing the terminal.

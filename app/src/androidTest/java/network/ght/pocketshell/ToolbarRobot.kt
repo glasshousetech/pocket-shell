@@ -16,8 +16,32 @@ object ToolbarRobot {
     const val HANDLE = "Terminal keys handle"
     const val ROW = "Terminal keys"
 
-    fun workspaceReady(device: UiDevice, timeoutMs: Long = 10000): Boolean =
-        device.wait(Until.hasObject(By.desc(HANDLE)), timeoutMs)
+    /**
+     * Drops cached accessibility nodes. On API 34 the cache keeps serving nodes from before the
+     * last scroll or recomposition, so every read that follows a gesture starts from a clean one.
+     */
+    fun refresh() {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.clearCache()
+        }
+    }
+
+    /** One read of the current screen. A stale node is read again; no input is ever repeated. */
+    private fun <T> fresh(read: () -> T): T {
+        val deadline = SystemClock.uptimeMillis() + 10000
+        while (true) {
+            refresh()
+            try { return read() }
+            catch (stale: androidx.test.uiautomator.StaleObjectException) {
+                if (SystemClock.uptimeMillis() >= deadline) throw stale
+            }
+        }
+    }
+
+    fun workspaceReady(device: UiDevice, timeoutMs: Long = 10000): Boolean {
+        refresh()
+        return device.wait(Until.hasObject(By.desc(HANDLE)), timeoutMs)
+    }
 
     /** Taps a tool, finding it again if its node went stale between the read and the tap. */
     fun click(device: UiDevice, label: String, timeoutMs: Long = 15000) {
@@ -30,7 +54,7 @@ object ToolbarRobot {
     }
 
     private fun keyLabels(device: UiDevice): List<String>? = runCatching {
-        device.findObject(By.desc(ROW))?.findObjects(By.clazz("android.widget.TextView"))?.mapNotNull { it.text }
+        fresh { device.findObject(By.desc(ROW))?.findObjects(By.clazz("android.widget.TextView"))?.mapNotNull { it.text } }
     }.getOrNull()
 
     /**
@@ -42,8 +66,8 @@ object ToolbarRobot {
         var last: android.graphics.Rect? = null
         var steady = 0
         repeat(40) {
-            val found = device.findObject(By.text(label)) ?: return null
-            val bounds = runCatching { found.visibleBounds }.getOrNull()
+            val found = fresh { device.findObject(By.text(label)) } ?: return null
+            val bounds = runCatching { fresh { found.visibleBounds } }.getOrNull()
             if (bounds == null || bounds.width() <= 0 || bounds.height() <= 0) return null
             steady = if (bounds == last) steady + 1 else 0
             if (steady >= 3) return found
@@ -63,11 +87,11 @@ object ToolbarRobot {
             // only once the row is idle and hand back a node from that settled tree.
             device.waitForIdle()
             settled(device, label)?.let { return it }
-            val row = device.findObject(By.desc(ROW))
+            val row = fresh { device.findObject(By.desc(ROW)) }
             if (row == null) {
                 // The toolbar is folded away: its handle opens it.
                 trace += "row absent, tapping handle"
-                device.findObject(By.desc(HANDLE))?.click()
+                fresh { device.findObject(By.desc(HANDLE)) }?.click()
                 device.wait(Until.hasObject(By.desc(ROW)), 3000)
                 continue
             }
@@ -76,7 +100,7 @@ object ToolbarRobot {
             // still found. Direction comes from what is on screen, never from scroll events.
             val before = keyLabels(device)
             val swiped = runCatching {
-                val b = row.visibleBounds
+                val b = fresh { row.visibleBounds }
                 val inset = b.width() / 8
                 val y = b.top + b.height() / 3
                 if (towardEnd) device.swipe(b.right - inset, y, b.left + inset, y, 24)
