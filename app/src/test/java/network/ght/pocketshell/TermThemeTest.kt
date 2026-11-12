@@ -17,6 +17,31 @@ class TermThemeTest {
         assertTrue(TermThemes.ALL.count { it.oled } >= 2)
     }
 
+    private fun luminance(rgb: Long): Double = listOf(16, 8, 0).zip(listOf(.2126, .7152, .0722)).sumOf { (shift, weight) ->
+        val channel = ((rgb shr shift) and 0xFF) / 255.0
+        weight * if (channel <= .04045) channel / 12.92 else Math.pow((channel + .055) / 1.055, 2.4)
+    }
+    private fun contrast(a: Long, b: Long): Double =
+        (maxOf(luminance(a), luminance(b)) + .05) / (minOf(luminance(a), luminance(b)) + .05)
+
+    /** The workspace menu, tabs, keys and terminal must read as separate regions in every theme. */
+    @Test fun everyThemeKeepsItsRegionsVisiblyApart() {
+        TermThemes.ALL.forEach { theme ->
+            val ui = theme.ui
+            val regions = listOf(theme.background, ui.surface, ui.surfaceAlt, ui.control)
+            regions.forEachIndexed { i, a ->
+                regions.drop(i + 1).forEach { b -> assertTrue("${theme.id}: two regions blend", contrast(a, b) >= 1.10) }
+            }
+            assertTrue("${theme.id}: menu blends into the terminal", contrast(ui.surfaceAlt, theme.background) >= 1.25)
+            assertTrue("${theme.id}: keys blend into the toolbar", contrast(ui.control, ui.surfaceAlt) >= 1.15)
+            regions.forEach { assertTrue("${theme.id}: border blends", contrast(ui.border, it) >= 1.30) }
+            listOf(ui.text, ui.muted, ui.accent, ui.error, ui.success, ui.warning, ui.info).forEach { ink ->
+                regions.forEach { assertTrue("${theme.id}: text unreadable", contrast(ink, it) >= 4.5) }
+            }
+            assertTrue("${theme.id}: accent label unreadable", contrast(ui.onAccent, ui.accent) >= 4.5)
+        }
+    }
+
     @Test fun legacyIdsAndUnknownPreferenceRemainUsable() {
         listOf("default", "dracula", "solarized_dark", "nord", "gruvbox_dark").forEach {
             assertEquals(it, TermThemes.byId(it).id)

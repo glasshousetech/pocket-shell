@@ -20,15 +20,18 @@ import androidx.compose.ui.window.Dialog
 import network.ght.pocketshell.ui.*
 
 /**
- * Extra-keys layout picker: preset rows, plus a customize section to reorder
- * (↑/↓), remove (×), and re-add individual keys. Opened by long-pressing the
- * extra-keys handle; the choice is persisted via [ExtraKeysLayouts].
+ * Extra-keys layout picker: preset rows, a key-size control, plus a customize
+ * section to reorder (↑/↓), remove (×), and re-add individual keys and terminal
+ * tools. Opened by long-pressing the extra-keys handle; the choice is persisted
+ * via [ExtraKeysLayouts] and the size via [WorkspacePrefs].
  */
 @Composable
 fun ExtraKeysDialog(
     current: List<ExtraKey>,
     onPickPreset: (ExtraKeysLayouts.Preset) -> Unit,
     onChange: (List<ExtraKey>) -> Unit,
+    keySizeDp: Int,
+    onKeySize: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -36,12 +39,13 @@ fun ExtraKeysDialog(
             modifier = Modifier
                 .clip(RoundedCornerShape(14.dp))
                 .background(RailSurface)
+                .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("Extra-Keys Row", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text(
-                "Pick a preset, or reorder and toggle keys below. Long-press the row's handle to get back here.",
+                "Pick a preset, or reorder and toggle keys below. History, Live, Actions and Text / voice sit at the end of the row. Long-press the row's handle to get back here.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
             )
             ExtraKeysLayouts.PRESETS.forEach { preset ->
@@ -51,6 +55,22 @@ fun ExtraKeysDialog(
                     onClick = { onPickPreset(preset) },
                 )
             }
+
+            Text("Key size: $keySizeDp dp", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f), enabled = keySizeDp > WorkspacePrefs.KEY_SIZE_MIN_DP,
+                    onClick = { onKeySize((keySizeDp - 4).coerceAtLeast(WorkspacePrefs.KEY_SIZE_MIN_DP)) },
+                ) { Text("Smaller keys", maxLines = 1) }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f), enabled = keySizeDp < WorkspacePrefs.KEY_SIZE_MAX_DP,
+                    onClick = { onKeySize((keySizeDp + 4).coerceAtMost(WorkspacePrefs.KEY_SIZE_MAX_DP)) },
+                ) { Text("Larger keys", maxLines = 1) }
+            }
+            Text(
+                "You can also drag the row's handle up or down to resize the keys.",
+                color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,
+            )
 
             Text("Customize", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 13.sp)
             Column(

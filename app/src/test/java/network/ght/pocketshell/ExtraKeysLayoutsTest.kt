@@ -16,6 +16,7 @@ class ExtraKeysLayoutsTest {
                 "home", "end", "pgup", "pgdn", "del",
                 "dash", "underscore", "tilde", "slash", "pipe", "colon",
                 "dot", "star", "equals", "dquote", "squote", "dollar",
+                "history_up", "history_down", "live", "actions", "text_voice",
             ),
             ExtraKeysLayouts.DEFAULT.keys.map { it.id },
         )
@@ -27,6 +28,33 @@ class ExtraKeysLayoutsTest {
             val ids = preset.keys.map { it.id }
             assertEquals(preset.id, ids.indexOf("tab") + 1, ids.indexOf("enter"))
         }
+    }
+
+    @Test
+    fun terminalToolsCloseEveryPresetInOrder() {
+        val tools = listOf("history_up", "history_down", "live", "actions", "text_voice")
+        assertEquals(tools, ExtraKeysLayouts.TOOLS.map { it.id })
+        ExtraKeysLayouts.PRESETS.forEach { preset ->
+            assertEquals(preset.id, tools, preset.keys.map { it.id }.takeLast(tools.size))
+        }
+        assertEquals(ExtraKeysLayouts.ALL.size, ExtraKeysLayouts.ALL.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun customizedRowsGainTheToolsAtTheEndWithoutDuplicates() {
+        val e = ExtraKeysLayouts
+        assertEquals(
+            listOf("esc", "up", "history_up", "history_down", "live", "actions", "text_voice"),
+            e.withTools(listOf(e.ESC, e.UP)).map { it.id },
+        )
+        // A row that already placed a tool keeps its position; only the missing ones are appended.
+        assertEquals(
+            listOf("actions", "esc", "history_up", "history_down", "live", "text_voice"),
+            e.withTools(listOf(e.ACTIONS, e.ESC)).map { it.id },
+        )
+        val complete = e.withTools(listOf(e.ESC))
+        assertEquals(complete, e.withTools(complete))
+        assertEquals(complete, e.decode(e.encode(complete)))
     }
 
     @Test

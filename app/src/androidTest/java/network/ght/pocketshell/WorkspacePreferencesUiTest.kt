@@ -48,7 +48,7 @@ class WorkspacePreferencesUiTest {
         val shots=File(ctx.filesDir,"screenshots").apply{mkdirs()}
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                find("Text / voice")
+                check(ToolbarRobot.workspaceReady(device)) { "Terminal workspace did not load" }
                 device.waitForIdle()
                 val before=columns()
                 find("⚙").click(); find("Appearance").click(); find("Larger").click()
@@ -72,7 +72,7 @@ class WorkspacePreferencesUiTest {
                 device.takeScreenshot(File(shots,"settings-appearance.png"))
                 scroll("Close settings"); find("Close settings").click()
                 activity.recreate()
-                find("Text / voice")
+                check(ToolbarRobot.workspaceReady(device)) { "Terminal workspace did not load" }
                 assertEquals(15,WorkspacePrefs.fontSize(ctx))
                 waitFor { columns()<before }
                 find("⚙").click(); find("Sessions & privacy").click()

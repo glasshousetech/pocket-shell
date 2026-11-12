@@ -22,6 +22,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -39,15 +43,21 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.res.ResourcesCompat
 import network.ght.pocketshell.ui.*
@@ -57,6 +67,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val serviceState = mutableStateOf<TermService?>(null)
@@ -177,7 +188,10 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
     val activeIndex = sessions.indexOfFirst { it.id == selectedSessionId }.coerceAtLeast(0)
     // Phone terminals need ESC/TAB/CTRL/navigation constantly. Keep the row
     // visible by default; the handle still collapses it when screen space wins.
-    var extraKeysOpen by remember { mutableStateOf(true) }
+    var extraKeysOpen by remember { mutableStateOf(WorkspacePrefs.toolbarOpen(ctx)) }
+    // Sizes the user sets by dragging the menu's edge or the toolbar handle, or from Settings.
+    var sidebarWidthDp by remember { mutableIntStateOf(WorkspacePrefs.sidebarWidth(ctx)) }
+    var toolbarKeySizeDp by remember { mutableIntStateOf(WorkspacePrefs.toolbarKeySize(ctx)) }
     var workspaceCollapsed by remember { mutableStateOf(WorkspacePrefs.workspaceCollapsed(ctx)) }
     var ctrlMenuOpen by remember { mutableStateOf(false) }
     var altMenuOpen by remember { mutableStateOf(false) }
@@ -406,6 +420,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onWorkspacePreferencesChanged = {
                 fontPoints = WorkspacePrefs.fontSize(ctx)
                 screenShouldStayOn = WorkspacePrefs.keepScreenOn(ctx)
+                sidebarWidthDp = WorkspacePrefs.sidebarWidth(ctx)
+                toolbarKeySizeDp = WorkspacePrefs.toolbarKeySize(ctx)
                 service.refreshPowerPolicy()
             },
             initialKey = Secrets.apiKey(ctx),
@@ -491,6 +507,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     extraKeys = keys
                 }
             },
+            keySizeDp = toolbarKeySizeDp,
+            onKeySize = { toolbarKeySizeDp = it; WorkspacePrefs.setToolbarKeySize(ctx, it) },
             onDismiss = { keysDialogOpen = false },
         )
     }
@@ -696,7 +714,8 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         onDismiss = { renameSessionId = null },
     )
 
-    val expandedWorkspace = LocalConfiguration.current.screenWidthDp >= 700
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val expandedWorkspace = screenWidthDp >= 700
     val controls: @Composable (Boolean) -> Unit = { sidebar ->
         TabRail(
             sessions = sessions,
@@ -719,9 +738,19 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
         )
     }
     Row(modifier = Modifier.fillMaxSize()) {
-      if (expandedWorkspace) Box(Modifier.width(if (workspaceCollapsed) 60.dp else 220.dp).fillMaxHeight()) { controls(true) }
+      if (expandedWorkspace) {
+          // A saved width can exceed what this screen allows (fold, rotation); clamp for display, keep the preference.
+          val sidebarMaxDp = WorkspacePrefs.sidebarMaxDp(screenWidthDp)
+          val openWidthDp = sidebarWidthDp.coerceIn(WorkspacePrefs.SIDEBAR_MIN_DP, sidebarMaxDp)
+          Box(Modifier.width(if (workspaceCollapsed) 60.dp else openWidthDp.dp).fillMaxHeight()) { controls(true) }
+          if (workspaceCollapsed) RegionDivider(vertical = true)
+          else SidebarResizeHandle(
+              widthDp = openWidthDp, minDp = WorkspacePrefs.SIDEBAR_MIN_DP, maxDp = sidebarMaxDp,
+              onResize = { sidebarWidthDp = it; WorkspacePrefs.setSidebarWidth(ctx, it) },
+          )
+      }
       Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-        if (!expandedWorkspace) controls(false)
+        if (!expandedWorkspace) { controls(false); RegionDivider() }
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(RailBg).padding(horizontal = 4.dp)) {
             AndroidView(
@@ -801,24 +830,9 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
           }
         }
 
-        Row(
-            Modifier.fillMaxWidth().background(RailSurfaceAlt).padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                KeyChip("History ↑") { termViewRef.value?.let { TerminalInteraction.pageHistory(it, up = true) } }
-                KeyChip("History ↓") { termViewRef.value?.let { TerminalInteraction.pageHistory(it, up = false) } }
-                if (!terminalInAlternateBuffer) {
-                    KeyChip("Live") { termViewRef.value?.let(TerminalInteraction::followOutput) }
-                }
-            }
-            KeyChip("Actions") { viewClient.hideKeyboard(); service.openWorkbench() }
-            KeyChip("Text / voice") {
-                viewClient.clearStickyModifiers()
-                textInputSessionId = active.id
-            }
-        }
-
+        // One collapsible toolbar. History, Live, Actions and Text / voice ride at its far end.
+        RegionDivider()
+        CompositionLocalProvider(LocalToolbarKeySize provides toolbarKeySizeDp) {
         // Keep terminal controls available even when Android reports a hardware keyboard.
         AnimatedVisibility(visible = extraKeysOpen, enter = expandVertically(), exit = shrinkVertically()) {
             when {
@@ -847,13 +861,30 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
                     onPgUp = { sendKey(KeyEvent.KEYCODE_PAGE_UP) },
                     onPgDown = { sendKey(KeyEvent.KEYCODE_PAGE_DOWN) },
                     onDel = { sendKey(KeyEvent.KEYCODE_FORWARD_DEL) },
+                    onHistoryUp = { termViewRef.value?.let { TerminalInteraction.pageHistory(it, up = true) } },
+                    onHistoryDown = { termViewRef.value?.let { TerminalInteraction.pageHistory(it, up = false) } },
+                    onLive = { termViewRef.value?.let(TerminalInteraction::followOutput) },
+                    // Full-screen programs own their own scrolling, so Live has nothing to return to there.
+                    liveAvailable = !terminalInAlternateBuffer,
+                    onActions = { viewClient.hideKeyboard(); service.openWorkbench() },
+                    onTextVoice = {
+                        viewClient.clearStickyModifiers()
+                        textInputSessionId = active.id
+                    },
                 )
             }
         }
+        }
         ExtraKeysHandle(
             open = extraKeysOpen,
-            onToggle = { extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false; altMenuOpen = false },
+            keySizeDp = toolbarKeySizeDp,
+            onToggle = {
+                extraKeysOpen = !extraKeysOpen; ctrlMenuOpen = false; altMenuOpen = false
+                WorkspacePrefs.setToolbarOpen(ctx, extraKeysOpen)
+            },
             onLongClick = { keysDialogOpen = true },
+            onResize = { toolbarKeySizeDp = it },
+            onResizeDone = { WorkspacePrefs.setToolbarKeySize(ctx, toolbarKeySizeDp) },
         )
     }
     }
@@ -1201,16 +1232,28 @@ private fun ExtraKeysRow(
     onPgUp: () -> Unit,
     onPgDown: () -> Unit,
     onDel: () -> Unit,
+    onHistoryUp: () -> Unit,
+    onHistoryDown: () -> Unit,
+    onLive: () -> Unit,
+    liveAvailable: Boolean,
+    onActions: () -> Unit,
+    onTextVoice: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(RailSurfaceAlt)
+            .semantics { contentDescription = "Terminal keys" }
             .horizontalScroll(rememberScrollState())
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        keys.forEach { key ->
+        keys.forEachIndexed { index, key ->
+            // A hairline marks where typing keys end and terminal tools begin.
+            if (key in ExtraKeysLayouts.TOOLS && index > 0 && keys[index - 1] !in ExtraKeysLayouts.TOOLS) {
+                Box(Modifier.width(1.dp).height((LocalToolbarKeySize.current * 0.6f).dp).background(RailBorder))
+            }
             val literal = key.literal
             if (literal != null) {
                 KeyChip(key.label) { onLiteral(literal) }
@@ -1231,6 +1274,11 @@ private fun ExtraKeysRow(
                     ExtraKeysLayouts.PGUP -> KeyChip(key.label, onClick = onPgUp)
                     ExtraKeysLayouts.PGDN -> KeyChip(key.label, onClick = onPgDown)
                     ExtraKeysLayouts.DEL -> KeyChip(key.label, onClick = onDel)
+                    ExtraKeysLayouts.HISTORY_UP -> KeyChip(key.label, onClick = onHistoryUp)
+                    ExtraKeysLayouts.HISTORY_DOWN -> KeyChip(key.label, onClick = onHistoryDown)
+                    ExtraKeysLayouts.LIVE -> if (liveAvailable) KeyChip(key.label, onClick = onLive)
+                    ExtraKeysLayouts.ACTIONS -> KeyChip(key.label, onClick = onActions)
+                    ExtraKeysLayouts.TEXT_VOICE -> KeyChip(key.label, onClick = onTextVoice)
                 }
             }
         }
@@ -1279,28 +1327,122 @@ private fun AltMenu(onKey: (Int) -> Unit, onBack: () -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun KeyChip(label: String, modifier: Modifier = Modifier, active: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+    // Padding and lettering scale with the key so a resized toolbar stays in proportion.
+    val size = LocalToolbarKeySize.current
+    val scale = size / WorkspacePrefs.KEY_SIZE_DEFAULT_DP.toFloat()
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
             .background(if (active) RailAccent else RailKeyChip)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .sizeIn(minWidth = size.dp, minHeight = size.dp)
+            .padding(horizontal = (10 * scale).dp, vertical = (8 * scale).dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = if (active) RailOnAccent else RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = 11.sp)
+        Text(label, color = if (active) RailOnAccent else RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Medium, fontSize = (11 * scale).sp, maxLines = 1)
+    }
+}
+
+/** Side length, in dp, of the keys in the collapsible toolbar. Every key row reads it, so they resize together. */
+private val LocalToolbarKeySize = compositionLocalOf { WorkspacePrefs.KEY_SIZE_DEFAULT_DP }
+
+/** A hairline in the theme's border color, so neighbouring regions stay separate in every theme. */
+@Composable
+private fun RegionDivider(vertical: Boolean = false) {
+    Box((if (vertical) Modifier.width(1.dp).fillMaxHeight() else Modifier.fillMaxWidth().height(1.dp)).background(RailBorder))
+}
+
+/**
+ * The grip between the open workspace menu and the terminal. Drag it to set the menu's width,
+ * double-tap to restore the default. A guide line follows the finger and the width is applied on
+ * release, so the terminal reflows its history once rather than on every frame of the drag.
+ */
+@Composable
+private fun SidebarResizeHandle(widthDp: Int, minDp: Int, maxDp: Int, onResize: (Int) -> Unit) {
+    val density = LocalDensity.current.density
+    var dragPx by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    val currentWidth by rememberUpdatedState(widthDp)
+    val currentResize by rememberUpdatedState(onResize)
+    val bounds by rememberUpdatedState(minDp..maxDp)
+    fun target() = (currentWidth + dragPx / density).roundToInt().coerceIn(bounds.first, bounds.last)
+    fun step(by: Int): Boolean { currentResize((currentWidth + by).coerceIn(bounds.first, bounds.last)); return true }
+    fun reset(): Boolean { currentResize(WorkspacePrefs.SIDEBAR_DEFAULT_DP.coerceIn(bounds.first, bounds.last)); return true }
+    Box(
+        Modifier.zIndex(1f).width(16.dp).fillMaxHeight().background(RailSurfaceAlt)
+            .semantics {
+                contentDescription = "Resize workspace menu"
+                stateDescription = "$widthDp dp wide"
+                customActions = listOf(
+                    CustomAccessibilityAction("Make workspace menu wider") { step(24) },
+                    CustomAccessibilityAction("Make workspace menu narrower") { step(-24) },
+                    CustomAccessibilityAction("Reset workspace menu width") { reset() },
+                )
+            }
+            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { reset() }) }
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { dragPx += it },
+                onDragStarted = { dragPx = 0f; dragging = true },
+                onDragStopped = { currentResize(target()); dragging = false; dragPx = 0f },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.align(Alignment.CenterEnd).width(1.dp).fillMaxHeight().background(RailBorder))
+        Box(Modifier.width(4.dp).height(34.dp).clip(RoundedCornerShape(3.dp)).background(if (dragging) RailAccent else RailBorder))
+        if (dragging) {
+            Box(Modifier.offset { IntOffset(((target() - currentWidth) * density).roundToInt(), 0) }
+                .width(2.dp).fillMaxHeight().background(RailAccent))
+        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ExtraKeysHandle(open: Boolean, onToggle: () -> Unit, onLongClick: () -> Unit) {
+private fun ExtraKeysHandle(
+    open: Boolean,
+    keySizeDp: Int,
+    onToggle: () -> Unit,
+    onLongClick: () -> Unit,
+    onResize: (Int) -> Unit,
+    onResizeDone: () -> Unit,
+) {
+    // Tap hides or shows the toolbar, long-press customizes it, and dragging up or down resizes its keys.
+    val density = LocalDensity.current.density
+    var dragPx by remember { mutableFloatStateOf(0f) }
+    var startSize by remember { mutableIntStateOf(keySizeDp) }
+    var dragging by remember { mutableStateOf(false) }
+    val currentSize by rememberUpdatedState(keySizeDp)
+    val currentResize by rememberUpdatedState(onResize)
+    val currentDone by rememberUpdatedState(onResizeDone)
+    fun sized(value: Int) = value.coerceIn(WorkspacePrefs.KEY_SIZE_MIN_DP, WorkspacePrefs.KEY_SIZE_MAX_DP)
+    fun step(by: Int): Boolean { currentResize(sized(currentSize + by)); currentDone(); return true }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(RailSurfaceAlt)
-            .combinedClickable(onClick = onToggle, onLongClick = onLongClick)
-            .padding(vertical = 6.dp),
+            .semantics {
+                contentDescription = "Terminal keys handle"
+                stateDescription = if (open) "Shown, keys $keySizeDp dp" else "Hidden"
+                customActions = listOf(
+                    CustomAccessibilityAction("Larger keys") { step(4) },
+                    CustomAccessibilityAction("Smaller keys") { step(-4) },
+                    CustomAccessibilityAction("Reset key size") { currentResize(WorkspacePrefs.KEY_SIZE_DEFAULT_DP); currentDone(); true },
+                )
+            }
+            .combinedClickable(
+                onClick = onToggle, onClickLabel = if (open) "Hide terminal keys" else "Show terminal keys",
+                onLongClick = onLongClick, onLongClickLabel = "Customize terminal keys",
+            )
+            .draggable(
+                enabled = open,
+                orientation = Orientation.Vertical,
+                // The toolbar is anchored to the bottom, so pulling the handle up makes the keys taller.
+                state = rememberDraggableState { dragPx -= it; currentResize(sized((startSize + dragPx / density).roundToInt())) },
+                onDragStarted = { startSize = currentSize; dragPx = 0f; dragging = true },
+                onDragStopped = { dragging = false; currentDone() },
+            )
+            .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
         Box(
@@ -1308,7 +1450,7 @@ private fun ExtraKeysHandle(open: Boolean, onToggle: () -> Unit, onLongClick: ()
                 .width(34.dp)
                 .height(4.dp)
                 .clip(RoundedCornerShape(3.dp))
-                .background(if (open) RailAccentDim else RailBorder),
+                .background(if (dragging) RailAccent else if (open) RailAccentDim else RailBorder),
         )
     }
 }

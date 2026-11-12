@@ -34,7 +34,7 @@ class TerminalWorkspaceUiTest {
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                device.wait(Until.findObject(By.text("Text / voice")), 10000)!!.click()
+                ToolbarRobot.click(device, "Text / voice")
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 5000))
                 device.findObject(By.clazz("android.widget.EditText")).text = "retained draft"
                 assertTrue(device.wait(Until.hasObject(By.text("retained draft")), 5000))
@@ -106,7 +106,7 @@ class TerminalWorkspaceUiTest {
                     } }
                     assertTrue("Rotated layout rendered", rendered.await(3, java.util.concurrent.TimeUnit.SECONDS))
                 }
-                assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 8000))
+                assertTrue(ToolbarRobot.workspaceReady(device, 8000))
                 // A short deterministic prompt avoids mksh horizontally scrolling
                 // the command out of the screen on the smallest hosted viewport.
                 instrumentation.runOnMainSync { fixture.session.write("PS1='> '; clear; echo UI_FIXTURE_READY\n") }
@@ -161,7 +161,7 @@ class TerminalWorkspaceUiTest {
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                 device.waitForIdle()
                 device.takeScreenshot(File(dir, "workspace-portrait.png"))
-                device.findObject(By.text("Text / voice")).click()
+                ToolbarRobot.click(device, "Text / voice")
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
                 val editor = device.findObject(By.clazz("android.widget.EditText"))
                 assertNotNull(editor)
@@ -172,7 +172,7 @@ class TerminalWorkspaceUiTest {
                 device.waitForIdle()
                 device.takeScreenshot(File(dir, "text-voice-portrait.png"))
                 device.findObject(By.text("Insert")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("History ↑")), 4000))
+                assertTrue(ToolbarRobot.workspaceReady(device, 4000))
                 instrumentation.runOnMainSync {
                     assertEquals(1, service.sessions.size)
                     assertSame(fixture.session, service.sessions.single().session)
@@ -199,13 +199,17 @@ class TerminalWorkspaceUiTest {
                 }
                 assertNotNull("Keyboard returns after inserting reviewed text", keyboard)
                 if (keyboard != null) {
-                    val ctrl = device.findObject(By.text("CTRL"))
-                    assertNotNull("Terminal modifiers stay available with the keyboard", ctrl)
-                    assertTrue("Keyboard must not cover terminal controls", ctrl.visibleBounds.bottom <= keyboard.visibleBounds.top)
+                    // The key row stays where it was last scrolled (here, at Text / voice), so
+                    // measure the toolbar itself: its row is present and its handle, the lowest
+                    // control, clears the keyboard.
+                    assertNotNull("Terminal modifiers stay available with the keyboard", device.findObject(By.desc(ToolbarRobot.ROW)))
+                    val handle = device.findObject(By.desc(ToolbarRobot.HANDLE))
+                    assertNotNull("The toolbar handle stays available with the keyboard", handle)
+                    assertTrue("Keyboard must not cover terminal controls", handle.visibleBounds.bottom <= keyboard.visibleBounds.top)
                 }
                 device.takeScreenshot(File(dir, "workspace-keyboard.png"))
                 activity.recreate()
-                assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 4000))
+                assertTrue(ToolbarRobot.workspaceReady(device, 4000))
                 instrumentation.runOnMainSync {
                     assertSame("Recreation must not kill SSH", fixture.session, service.sessions.single().session)
                     assertTrue(fixture.alive.value)
@@ -221,7 +225,7 @@ class TerminalWorkspaceUiTest {
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                 rotateAndWait(android.content.res.Configuration.ORIENTATION_LANDSCAPE) { device.setOrientationLeft() }
                 device.takeScreenshot(File(dir, "workspace-landscape.png"))
-                device.findObject(By.text("Text / voice")).click()
+                ToolbarRobot.click(device, "Text / voice")
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
                 val closeVisible = device.wait(Until.hasObject(By.text("Close")), 4000)
                 if (!closeVisible) {
@@ -234,7 +238,7 @@ class TerminalWorkspaceUiTest {
                 device.findObject(By.text("Close")).click()
                 assertTrue(device.wait(Until.gone(By.text("Text to insert")), 4000))
                 rotateAndWait(android.content.res.Configuration.ORIENTATION_PORTRAIT) { device.setOrientationNatural() }
-                device.findObject(By.text("Text / voice")).click()
+                ToolbarRobot.click(device, "Text / voice")
                 assertTrue(device.wait(Until.hasObject(By.text("Text to insert")), 4000))
                 device.findObject(By.clazz("android.widget.EditText")).text = "retained draft"
                 val draftVisible = device.wait(Until.hasObject(By.text("retained draft")), 4000)

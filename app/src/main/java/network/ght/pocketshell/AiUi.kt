@@ -167,6 +167,8 @@ fun SettingsDialog(
     var updateState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
     var storageGranted by remember { mutableStateOf(StorageAccess.isGranted(ctx)) }
     var fontPoints by remember { mutableIntStateOf(WorkspacePrefs.fontSize(ctx)) }
+    var sidebarWidth by remember { mutableIntStateOf(WorkspacePrefs.sidebarWidth(ctx)) }
+    var keySize by remember { mutableIntStateOf(WorkspacePrefs.toolbarKeySize(ctx)) }
     var keepScreenOn by remember { mutableStateOf(WorkspacePrefs.keepScreenOn(ctx)) }
     var backgroundWork by remember { mutableStateOf(WorkspacePrefs.backgroundWork(ctx)) }
     var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
@@ -232,6 +234,31 @@ fun SettingsDialog(
                 OutlinedButton(modifier = Modifier.weight(1f), enabled = fontPoints < 28, onClick = { fontPoints++; WorkspacePrefs.setFontSize(ctx,fontPoints); onWorkspacePreferencesChanged() }) { Text("Larger") }
             }
             Text("Pinch changes are saved too.", color = RailDimText)
+            SettingsDivider()
+
+            // Every toolbar and menu is adjustable. These are the same sizes the drag handles set.
+            Text("Layout sizes", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            val sidebarMax = WorkspacePrefs.sidebarMaxDp(LocalConfiguration.current.screenWidthDp)
+            fun saveSidebar(value: Int) {
+                sidebarWidth = value.coerceIn(WorkspacePrefs.SIDEBAR_MIN_DP, sidebarMax)
+                WorkspacePrefs.setSidebarWidth(ctx, sidebarWidth); onWorkspacePreferencesChanged()
+            }
+            fun saveKeySize(value: Int) {
+                keySize = value.coerceIn(WorkspacePrefs.KEY_SIZE_MIN_DP, WorkspacePrefs.KEY_SIZE_MAX_DP)
+                WorkspacePrefs.setToolbarKeySize(ctx, keySize); onWorkspacePreferencesChanged()
+            }
+            Text("Workspace menu width: $sidebarWidth dp", color = RailOutText)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(modifier = Modifier.weight(1f), enabled = sidebarWidth > WorkspacePrefs.SIDEBAR_MIN_DP, onClick = { saveSidebar(sidebarWidth - 20) }) { Text("Narrower") }
+                OutlinedButton(modifier = Modifier.weight(1f), enabled = sidebarWidth < sidebarMax, onClick = { saveSidebar(sidebarWidth + 20) }) { Text("Wider") }
+            }
+            Text("Toolbar key size: $keySize dp", color = RailOutText)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(modifier = Modifier.weight(1f), enabled = keySize > WorkspacePrefs.KEY_SIZE_MIN_DP, onClick = { saveKeySize(keySize - 4) }) { Text("Smaller keys") }
+                OutlinedButton(modifier = Modifier.weight(1f), enabled = keySize < WorkspacePrefs.KEY_SIZE_MAX_DP, onClick = { saveKeySize(keySize + 4) }) { Text("Larger keys") }
+            }
+            TextButton(onClick = { saveSidebar(WorkspacePrefs.SIDEBAR_DEFAULT_DP); saveKeySize(WorkspacePrefs.KEY_SIZE_DEFAULT_DP) }) { Text("Reset layout sizes") }
+            Text("Or drag them: the right edge of the open workspace menu, and the handle under the toolbar keys. The menu shows on wide screens such as an unfolded phone.", color = RailDimText, fontSize = 12.sp)
             SettingsDivider()
 
             }
@@ -322,7 +349,7 @@ fun SettingsDialog(
             Text(
                 "Your keyboard’s voice, clipboard and composed input are available at the prompt. " +
                     "PocketShell does not request incognito mode, automatic capitalization or command corrections. " +
-                    "Use Text / voice to review a command before inserting it.",
+                    "Use Text / voice, at the end of the toolbar keys, to review a command before inserting it.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 12.sp, lineHeight = 18.sp,
             )
 

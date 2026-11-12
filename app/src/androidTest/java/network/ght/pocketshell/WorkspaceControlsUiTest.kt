@@ -51,7 +51,7 @@ class WorkspaceControlsUiTest {
         WorkspacePrefs.setWorkspaceCollapsed(ctx, false)
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                assertNotNull(device.wait(Until.findObject(By.text("Text / voice")), 10000))
+                assertTrue(ToolbarRobot.workspaceReady(device))
                 // Typed but not submitted; the arithmetic proves the shell ran it.
                 inst.runOnMainSync { fixture.session.write("echo ENTER_\$((40+2))") }
                 assertTrue(waitForOutput(fixture, "echo ENTER_"))

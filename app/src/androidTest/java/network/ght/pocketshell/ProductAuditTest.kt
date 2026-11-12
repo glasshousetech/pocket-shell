@@ -69,7 +69,7 @@ class ProductAuditTest {
                 activity.onActivity { assertSame(beta.session, terminal(it.window.decorView)!!.currentSession) }
                 shot("selected-beta-before")
                 activity.recreate()
-                assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 10000))
+                assertTrue(ToolbarRobot.workspaceReady(device, 10000))
                 shot("selected-tab-after-recreation")
                 activity.onActivity {
                     assertSame("The selected tab must remain BETA after Activity recreation", beta.session,
@@ -86,8 +86,8 @@ class ProductAuditTest {
         fixture(service, "AUDIT DRAFT")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 10000))
-                device.findObject(By.text("Text / voice")).click()
+                assertTrue(ToolbarRobot.workspaceReady(device, 10000))
+                ToolbarRobot.click(device, "Text / voice")
                 assertTrue(device.wait(Until.hasObject(By.clazz("android.widget.EditText")), 5000))
                 device.findObject(By.clazz("android.widget.EditText")).text = "echo SAFE_AUDIT_DRAFT"
                 assertTrue(device.wait(Until.hasObject(By.text("echo SAFE_AUDIT_DRAFT")), 5000))
@@ -95,8 +95,8 @@ class ProductAuditTest {
                 activity.recreate()
                 device.waitForIdle()
                 if (!device.hasObject(By.clazz("android.widget.EditText"))) {
-                    assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 5000))
-                    device.findObject(By.text("Text / voice")).click()
+                    assertTrue(ToolbarRobot.workspaceReady(device, 5000))
+                    ToolbarRobot.click(device, "Text / voice")
                 }
                 shot("draft-after-recreation")
                 assertTrue("An unsubmitted draft must survive Activity recreation",
