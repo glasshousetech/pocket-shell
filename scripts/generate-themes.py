@@ -42,6 +42,15 @@ def render():
         for role in ('text', 'muted', 'accent', 'error', 'success', 'warning', 'info'):
             for bg in backgrounds:
                 assert contrast(u[role], bg) >= 4.5, (t['id'], role, bg, contrast(u[role], bg))
+        # Regions must never blend: every background role is a visible step from the others,
+        # the chrome around the terminal most of all, and the border clears every one of them.
+        for i, a in enumerate(backgrounds):
+            for b in backgrounds[i + 1:]:
+                assert contrast(a, b) >= 1.10, (t['id'], 'backgrounds blend', a, b, contrast(a, b))
+        assert contrast(u['surfaceAlt'], terminal['background']) >= 1.25, (t['id'], 'chrome blends into terminal')
+        assert contrast(u['control'], u['surfaceAlt']) >= 1.15, (t['id'], 'controls blend into chrome')
+        for bg in backgrounds:
+            assert contrast(u['border'], bg) >= 1.30, (t['id'], 'border blends', bg, contrast(u['border'], bg))
         assert contrast(u['onAccent'], u['accent']) >= 4.5, t['id']
         assert contrast(terminal['foreground'], terminal['background']) >= 4.5, t['id']
         q = lambda x: json.dumps(x, ensure_ascii=False)
@@ -82,4 +91,4 @@ if __name__ == '__main__':
             assert path.exists() and path.read_text() == text, f'Stale generated file: {path}'
         else:
             path.write_text(text)
-    print('20 themes validated: unique IDs, complete ANSI palettes, readable UI text, matching Android/CSS adapters.')
+    print('20 themes validated: unique IDs, complete ANSI palettes, readable UI text, distinct regions, matching Android/CSS adapters.')

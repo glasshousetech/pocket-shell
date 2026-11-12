@@ -4,8 +4,9 @@ import android.content.Context
 
 /**
  * One chip in the extra-keys row. [literal] keys just type a character; the
- * rest map to key events (ESC/TAB/arrows/…) or open the CTRL/ALT combo menus
- * — the wiring lives in MainActivity's ExtraKeysRow.
+ * rest map to key events (ESC/TAB/arrows/…), open the CTRL/ALT combo menus, or
+ * run a terminal tool (history paging, Actions, Text / voice) — the wiring
+ * lives in MainActivity's ExtraKeysRow.
  */
 data class ExtraKey(
     val id: String,
@@ -41,6 +42,15 @@ object ExtraKeysLayouts {
     val DEL = ExtraKey("del", "DEL")
     val ENTER = ExtraKey("enter", "ENTER")
 
+    // Terminal tools. These were a fixed row above the keys; they now sit at the end of the
+    // collapsible row, where they can be reordered or removed like any other key.
+    val HISTORY_UP = ExtraKey("history_up", "History ↑")
+    val HISTORY_DOWN = ExtraKey("history_down", "History ↓")
+    val LIVE = ExtraKey("live", "Live")
+    val ACTIONS = ExtraKey("actions", "Actions")
+    val TEXT_VOICE = ExtraKey("text_voice", "Text / voice")
+    val TOOLS: List<ExtraKey> = listOf(HISTORY_UP, HISTORY_DOWN, LIVE, ACTIONS, TEXT_VOICE)
+
     /** Every key that can appear in the row, in default order. */
     val ALL: List<ExtraKey> = listOf(
         ESC, TAB, ENTER, CTRL, ALT, SHIFT,
@@ -58,7 +68,7 @@ object ExtraKeysLayouts {
         ExtraKey("dquote", "\"", '"'),
         ExtraKey("squote", "'", '\''),
         ExtraKey("dollar", "$", '$'),
-    )
+    ) + TOOLS
 
     data class Preset(val id: String, val label: String, val blurb: String, val keys: List<ExtraKey>)
 
@@ -68,7 +78,7 @@ object ExtraKeysLayouts {
     /** Just the essentials — ESC/TAB, modifiers, arrows. */
     val MINIMAL = Preset(
         "minimal", "Minimal", "ESC, TAB, ENTER, CTRL, ALT, SHIFT, and arrows only.",
-        listOf(ESC, TAB, ENTER, CTRL, ALT, SHIFT, LEFT, DOWN, UP, RIGHT),
+        listOf(ESC, TAB, ENTER, CTRL, ALT, SHIFT, LEFT, DOWN, UP, RIGHT) + TOOLS,
     )
 
     /** Tuned for ssh + tmux: scrollback paging and the keys remote shells lean on. */
@@ -82,7 +92,7 @@ object ExtraKeysLayouts {
             ALL.first { it.id == "tilde" },
             ALL.first { it.id == "dash" },
             ALL.first { it.id == "slash" },
-        ),
+        ) + TOOLS,
     )
 
     val PRESETS: List<Preset> = listOf(DEFAULT, MINIMAL, SSH_TMUX)
@@ -91,6 +101,7 @@ object ExtraKeysLayouts {
     private const val KEY_PRESET = "extra_keys_preset"
     private const val KEY_CUSTOM = "extra_keys_custom"
     private const val KEY_ENTER_ADDED = "extra_keys_enter_added"
+    private const val KEY_TOOLS_ADDED = "extra_keys_tools_added"
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -101,10 +112,14 @@ object ExtraKeysLayouts {
     fun saved(context: Context): List<ExtraKey> {
         val p = prefs(context)
         decode(p.getString(KEY_CUSTOM, null))?.let { custom ->
-            // ENTER arrived after rows could be customized. Add it once, next to TAB; removing it later sticks.
-            if (p.getBoolean(KEY_ENTER_ADDED, false)) return custom
-            val upgraded = withEnter(custom)
-            p.edit().putString(KEY_CUSTOM, encode(upgraded)).putBoolean(KEY_ENTER_ADDED, true).apply()
+            // ENTER and the terminal tools arrived after rows could be customized. Add each once
+            // (ENTER next to TAB, the tools at the very end); removing them later sticks.
+            val enterDone = p.getBoolean(KEY_ENTER_ADDED, false)
+            val toolsDone = p.getBoolean(KEY_TOOLS_ADDED, false)
+            if (enterDone && toolsDone) return custom
+            val upgraded = (if (enterDone) custom else withEnter(custom)).let { if (toolsDone) it else withTools(it) }
+            p.edit().putString(KEY_CUSTOM, encode(upgraded))
+                .putBoolean(KEY_ENTER_ADDED, true).putBoolean(KEY_TOOLS_ADDED, true).apply()
             return upgraded
         }
         val preset = PRESETS.firstOrNull { it.id == p.getString(KEY_PRESET, DEFAULT.id) } ?: DEFAULT
@@ -121,7 +136,8 @@ object ExtraKeysLayouts {
 
     /** Persists a user-reordered/toggled row. */
     fun saveCustom(context: Context, keys: List<ExtraKey>) {
-        prefs(context).edit().putString(KEY_CUSTOM, encode(keys)).putBoolean(KEY_ENTER_ADDED, true).apply()
+        prefs(context).edit().putString(KEY_CUSTOM, encode(keys))
+            .putBoolean(KEY_ENTER_ADDED, true).putBoolean(KEY_TOOLS_ADDED, true).apply()
     }
 
     /** [keys] with ENTER after TAB (or after ESC, else first) unless it is already there. */
@@ -130,6 +146,9 @@ object ExtraKeysLayouts {
         val anchor = keys.indexOf(TAB).takeIf { it >= 0 } ?: keys.indexOf(ESC)
         return keys.toMutableList().apply { add(anchor + 1, ENTER) }
     }
+
+    /** [keys] followed by any terminal tool it does not already hold, in catalog order. */
+    internal fun withTools(keys: List<ExtraKey>): List<ExtraKey> = keys + TOOLS.filter { it !in keys }
 
     /** True when [keys] is exactly a preset's row (used to show the ✓). */
     fun matchesPreset(keys: List<ExtraKey>, preset: Preset): Boolean =

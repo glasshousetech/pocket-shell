@@ -106,7 +106,7 @@ class WorkbenchUiTest {
                         .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
                 }
                 beat("terminal")
-                text("Actions").click()
+                ToolbarRobot.click(device, "Actions")
                 text("Saved commands").click()
                 text("Add command").click()
                 text("Save command")
@@ -163,7 +163,7 @@ class WorkbenchUiTest {
                 desc("Close tools").click()
 
                 // Reload the library from its actual atomic file, then edit and delete through UI.
-                text("Actions").click()
+                ToolbarRobot.click(device, "Actions")
                 text("Saved commands").click()
                 text("Refresh commands").click()
                 desc("Edit Print a message").click()
@@ -179,7 +179,7 @@ class WorkbenchUiTest {
 
                 // Palette selection routes the visible service selection without executing anything.
                 val sibling = main { service.newSession(SessionMode.SYSTEM).also { service.renameSession(it, "Sibling terminal") } }
-                text("Actions").click()
+                ToolbarRobot.click(device, "Actions")
                 setField("Find an action, session, host or command", 0, "Sibling")
                 text("Switch to Sibling terminal").click()
                 assertEquals(sibling.id, main { service.selectedSessionId.value })
@@ -231,7 +231,7 @@ class WorkbenchUiTest {
         try {
             assertEquals("Restoring siblings must retain the visible first tab", restored.id, main { service.selectedSessionId.value })
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                text("Actions").click()
+                ToolbarRobot.click(device, "Actions")
                 text("Search output").click()
                 setField("Find in output", 0, marker)
                 text("Match 1 of 1")

@@ -122,8 +122,35 @@ class TabMenuUiTest {
         return found ?: throw AssertionError("Tab is unreachable by scrolling: $tabText")
     }
 
+    /**
+     * A tab read once the rail has stopped moving. Compose replaces accessibility nodes whenever
+     * the rail scrolls, reveals the active tab or closes a menu, so a node found mid-change is
+     * either stale or already somewhere else by the time a gesture is sent.
+     */
+    private fun settledTab(tabText: String): UiObject2 {
+        var last: android.graphics.Rect? = null
+        repeat(60) {
+            val tab = findTab(tabText)
+            val bounds = runCatching { tab.visibleBounds }.getOrNull()
+            if (bounds != null && bounds == last) return tab
+            last = bounds
+            android.os.SystemClock.sleep(50)
+        }
+        return findTab(tabText)
+    }
+
+    /** Sends one gesture to a settled tab. A stale node throws before any input is dispatched, so re-reading it never repeats input. */
+    private fun onSettledTab(tabText: String, gesture: (UiObject2) -> Unit) {
+        var stale: androidx.test.uiautomator.StaleObjectException? = null
+        repeat(5) {
+            try { gesture(settledTab(tabText)); return }
+            catch (e: androidx.test.uiautomator.StaleObjectException) { stale = e }
+        }
+        throw AssertionError("The tab kept changing and could not be touched: $tabText", stale)
+    }
+
     private fun openMenu(tabText: String) {
-        findTab(tabText).longClick()
+        onSettledTab(tabText) { it.longClick() }
         assertTrue("Long-pressing the tab text opens its menu", device.wait(Until.hasObject(By.text("Rename…")), 5000))
     }
 
@@ -173,7 +200,7 @@ class TabMenuUiTest {
             device.executeShellCommand("wm density 320")
             device.executeShellCommand("wm size 720x1500")
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                find("Text / voice")
+                assertTrue("Terminal workspace loads", ToolbarRobot.workspaceReady(device))
                 fun hideKeyboard() = activity.onActivity {
                     (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
                         .hideSoftInputFromWindow(it.window.decorView.windowToken, 0)
@@ -183,15 +210,16 @@ class TabMenuUiTest {
                 onMain { service.selectedSessionId.value = fixtures.last().id }
                 assertTabControls(fixtures.last(), activity)
                 // Scrolling to older tabs is still allowed while a distant tab is selected.
-                val firstTab = findTab(fixtures.first().displayName)
+                findTab(fixtures.first().displayName)
                 assertVisible(activity, fixtures.last(), "Manual scrolling must not select another terminal")
-                firstTab.click()
+                // One tap, sent only after the rail has settled, so it lands on the tab.
+                onSettledTab(fixtures.first().displayName) { it.click() }
                 waitFor("first tab selected") { service.selectedSessionId.value == fixtures.first().id }
                 assertTabControls(fixtures.first(), activity)
                 onMain { service.moveSession(fixtures.first(), service.sessions.lastIndex) }
                 assertTabControls(fixtures.first(), activity)
                 activity.recreate()
-                find("Text / voice")
+                assertTrue("Terminal workspace loads", ToolbarRobot.workspaceReady(device))
                 hideKeyboard()
                 assertTabControls(fixtures.first(), activity)
                 device.executeShellCommand("wm size 1680x1800")
@@ -257,7 +285,7 @@ class TabMenuUiTest {
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                if (!device.wait(Until.hasObject(By.text("Text / voice")), 20000)) {
+                if (!ToolbarRobot.workspaceReady(device, 20000)) {
                     shot("launch-failure")
                     fail("The terminal workspace never appeared")
                 }

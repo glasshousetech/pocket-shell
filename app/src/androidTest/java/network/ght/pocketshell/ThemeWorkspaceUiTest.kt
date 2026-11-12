@@ -109,7 +109,7 @@ class ThemeWorkspaceUiTest {
                     }
                     assertNotNull("Search reaches ${theme.label}", card)
                     card.click()
-                    assertTrue(device.wait(Until.hasObject(By.text("Text / voice")), 4000))
+                    assertTrue(ToolbarRobot.workspaceReady(device, 4000))
                     hideKeyboard()
                     assertEquals(theme.id, TermThemes.saved(ctx).id)
                     activity.onActivity {

@@ -8,6 +8,17 @@ Run `python3 scripts/generate-themes.py` from the repository root after editing 
 - Web: import `ght-themes.css` and set `data-ght-theme="ght_signature"` on the app root. Use `--ght-background`, `--ght-surface`, `--ght-control`, `--ght-text`, `--ght-muted`, `--ght-accent`, `--ght-on-accent`, and the semantic roles.
 - Other platforms: read RGB hex values from the JSON. `mode` controls platform light/dark behavior; `terminal` supplies all 16 ANSI colors and defaults.
 
+Regions never blend. The four background roles form a ladder with a guaranteed contrast step between every pair, so the terminal, the chrome around it (`surfaceAlt`: menus, toolbars, system bars), raised items (`surface`: tabs, cards, dialogs) and controls (`control`: keys, inputs) always read as separate things:
+
+| Rule | Minimum contrast |
+|---|---|
+| Chrome against the terminal background | 1.25:1 |
+| Any two of background, surface, surfaceAlt, control | 1.10:1 |
+| Controls against the chrome they sit on | 1.15:1 |
+| Border against every background role | 1.30:1 |
+
+Near-black dark themes raise the chrome above the terminal. Mid-tone dark themes (Dracula, Nord, Gruvbox) recess it below, as their upstream ports do. Light themes put the chrome a step darker than the paper. `python3 scripts/retone-themes.py` rebuilds the ladder for any theme that breaks a rule and leaves valid themes untouched; the generator and the Android unit tests reject a catalog that blends. When adding a theme, set the terminal colors and a rough tint for the UI roles, run the retone script, then the generator.
+
 Text, muted text, accent, error, success, warning, and info meet at least 4.5:1 contrast on the background, surface, alternate surface, and control backgrounds. On-accent text meets the same threshold. Terminal foreground is validated separately. ANSI palettes remain conventional (including black/white); arbitrary terminal programs can still request their own 256-color/true-color values or OSC overrides.
 
 ## Catalog

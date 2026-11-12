@@ -45,7 +45,7 @@ class NativeLayoutReviewTest {
                 device.executeShellCommand("settings put system font_scale $scale")
                 Thread.sleep(700)
                 ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                    find("Text / voice")
+                    check(ToolbarRobot.workspaceReady(device)) { "Terminal workspace did not load" }
                     activity.onActivity {(it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken,0)}
                     if(name=="unfolded") find("WORKSPACES") else assertFalse(device.hasObject(By.text("WORKSPACES")))
                     shot("$name-workspace")
