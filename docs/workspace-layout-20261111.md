@@ -61,3 +61,40 @@ regions. Now:
   Compose rebuilds accessibility nodes while a scroll settles.
 - **`UiDevice.drag` holds a long-press before moving.** On the toolbar handle that opens the keys
   dialog. Use `swipe` to exercise a Compose `draggable` that shares a node with a long-click.
+
+## Verification
+
+- Unit tests and lint: pass (theme region rules, tool placement and the custom-row migration included).
+- Hosted CI run 43153968055 on the merged commit's parent (`140436d`), API 34 at 320x640 dp: build,
+  lint and all 73 instrumented tests pass, including `WorkspaceLayoutUiTest` and
+  `WorkspaceControlsUiTest`, which CI now runs.
+- agent-prod, private API 34 emulator matching CI: 68 of 68 (every class except the three that
+  need CI's file-transfer fixture), including all 20 themes applied to two live sessions.
+- agent-prod, private API 35 emulator at 1080x2400 and 1680x1800: 67 of 69. The two others are not
+  regressions: `ThemeWorkspaceUiTest` fails at the same line on the untouched 0.6.0 build on that
+  image, and `ThemeUpgradeTest` needs the release workflow's arguments.
+- The first CI run on this branch (43150730484) failed six tests. All six were the new test helper
+  reading API 34's stale accessibility cache; one exposed a real defect on a short screen, where
+  the keys dialog's Close button scrolled out of reach. Both are fixed in `140436d`.
+
+## Deployment — 0.7.0, November 12, 2026 (UTC)
+
+Connor: "get all of them completely ready and fully deployed."
+
+- PR #19 merged as `ec92abb`; tag `v0.7.0`; signed release run 43155359613 passed, including the
+  same-signer upgrade from the public APK and the signed runtime smoke.
+- APK SHA-256 `8ae671487e28232cbe92fcd57abd27f531e3988ff248ef40fffc53974522d5d9`, signer
+  `ceee0b98…1420` (identical to the live 0.6.0 APK), versionCode 34, not debuggable.
+- Live: `https://dl.ght.network/pocketshell.apk` (stable), immutable
+  `https://dl.ght.network/apps/pocketshell/0.7.0-8ae671487e28/pocketshell-0.7.0.apk` (exact path
+  added to the Caddy download allow-list), `pocketshell-latest.json` (versionCode 34).
+  `scripts/verify-deploy.sh v0.7.0`: OK. GitHub `releases/latest` is v0.7.0, so the in-app updater
+  offers it. The 0.6.0 immutable URL still serves.
+- Rollback: `/opt/halo-dl/pocketshell.apk.bak-0.6.0-20261112T043855Z`,
+  `pocketshell-latest.json.bak-0.6.0-20261112T043855Z` and
+  `/etc/caddy/Caddyfile.bak-pocketshell-0.7.0-20261112T043855Z` on gh-cloud-01.
+- The website needed no change: ght.network/software/pocketshell links the stable download and
+  shows no version number.
+- Not done: the Fold7 was not updated remotely, because installing ends running sessions. Update
+  from Settings › Updates, or the download link. The drag handles have been exercised on emulators
+  only; a finger on the Fold7's inner screen is the remaining check.
