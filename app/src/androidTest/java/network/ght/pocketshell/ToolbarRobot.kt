@@ -80,7 +80,19 @@ object ToolbarRobot {
                     try { current.first.click() }
                     catch (_: androidx.test.uiautomator.StaleObjectException) { continue }
                     device.waitForIdle()
-                    return
+                    // Refresh on every read: API34 can otherwise retain the previous
+                    // tab's close/options nodes even after the terminal has switched.
+                    val selectedDeadline = SystemClock.uptimeMillis() + 5000
+                    while (SystemClock.uptimeMillis() < selectedDeadline) {
+                        val selected = fresh {
+                            val rail = device.findObject(By.desc("Session tabs"))
+                            rail?.findObject(compact)?.isSelected == true ||
+                                rail?.hasObject(By.desc("Close tab $label")) == true
+                        }
+                        if (selected) return
+                        SystemClock.sleep(20)
+                    }
+                    throw AssertionError("The tapped session did not become selected: $label")
                 }
                 continue
             }
