@@ -34,6 +34,8 @@ class InstalledSessionActionsUiTest {
                 Bootstrap.install(ctx, Distro.Alpine) { status ->
                     inst.sendStatus(2, Bundle().apply { putString("stream", "LINUX_SETUP $status\n") })
                 }.getOrThrow()
+            } else {
+                Bootstrap.healthCheck(ctx).getOrThrow()
             }
             WorkspacePrefs.setWorkspaceCollapsed(ctx, false)
             device.executeShellCommand("wm density 320")
@@ -62,6 +64,7 @@ class InstalledSessionActionsUiTest {
                     if (!completed) Thread.sleep(50)
                 }
                 assertTrue("The selected tab runs a real Linux shell", completed)
+                inst.sendStatus(2, Bundle().apply { putString("stream", "POCKETSHELL_REAL_LINUX_NEW_TAB_OK\n") })
                 activity.onActivity {
                     (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
                         .hideSoftInputFromWindow(it.window.decorView.windowToken, 0)
