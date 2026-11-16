@@ -10,6 +10,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Test
@@ -53,9 +55,9 @@ class ScreenshotTest {
             Log.i(TAG, "wrote ${file.absolutePath} (${file.length()} bytes)")
         }
 
-        ActivityScenario.launch(MainActivity::class.java).use {
-            // First run gates the whole UI behind a distro install that cannot be
-            // dismissed, so take Alpine — a ~3 MB rootfs — to get past it.
+        ActivityScenario.launch(MainActivity::class.java).use { activity ->
+            // The empty workspace opens the distro chooser. Use Alpine for this owned capture.
+            device.wait(Until.findObject(By.text("Set up Ubuntu")), 5_000)?.click()
             if (device.wait(Until.findObject(By.text("Set up Pocket Shell")), 15_000) != null) {
                 capture("first_run_setup")
                 device.findObject(By.text("Alpine Linux"))?.click()
@@ -98,17 +100,24 @@ class ScreenshotTest {
             File(outDir, "first-use-diagnostics.jsonl").writeText(DiagnosticLog.read(instrumentation.targetContext))
             capture("command_output")
 
-            fun click(label: String) {
-                requireNotNull(device.wait(Until.findObject(By.text(label)), 5_000)) {
-                    "Missing capture control: " + label
-                }.click()
-                device.waitForIdle()
+            fun find(selector: BySelector): UiObject2 {
+                val deadline = android.os.SystemClock.uptimeMillis() + 5_000
+                while (android.os.SystemClock.uptimeMillis() < deadline) {
+                    ToolbarRobot.refresh()
+                    device.findObject(selector)?.let { return it }
+                    Thread.sleep(60)
+                }
+                capture("missing_control")
+                throw AssertionError("Missing capture control: $selector")
             }
-            fun visible(label: String) {
-                assertTrue("Expected capture screen: " + label,
-                    device.wait(Until.hasObject(By.text(label)), 5_000))
+            fun click(label: String) { find(By.text(label)).click(); device.waitForIdle() }
+            fun clickDescription(label: String) { find(By.desc(label)).click(); device.waitForIdle() }
+            fun visible(label: String) { find(By.text(label)) }
+            activity.onActivity {
+                (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .hideSoftInputFromWindow(it.window.decorView.windowToken, 0)
             }
-            requireNotNull(device.wait(Until.findObject(By.desc("Settings")), 5_000)).click()
+            clickDescription("Settings")
             visible("Pocket Shell Settings")
             capture("settings")
 
@@ -120,19 +129,23 @@ class ScreenshotTest {
             device.pressBack()
             assertTrue(device.wait(Until.gone(By.text("Pocket Shell Settings")), 5_000))
 
-            click("AI")
+            clickDescription("Settings")
+            click("AI Copilot")
+            click("Open AI Copilot")
             visible("Close AI")
             capture("copilot_panel")
             click("Close AI")
             assertTrue(device.wait(Until.gone(By.text("Close AI")), 5_000))
 
-            click("Theme")
+            clickDescription("Settings")
+            click("Appearance")
+            click("Browse 20 themes")
             visible("Themes")
             capture("theme_picker")
             click("Close")
             assertTrue(device.wait(Until.gone(By.text("Themes")), 5_000))
 
-            click("Connect")
+            clickDescription("Connect")
             visible("Connections")
             capture("connections")
             click("Close connections")
