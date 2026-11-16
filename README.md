@@ -72,20 +72,22 @@ CI builds the app with JDK 17 and pinned Android SDK/NDK tools. To build yoursel
 - [x] Tab Rail multi-session UI + complete app themes
 - [x] On-screen extra keys + Ctrl pad, pinch-to-zoom, clipboard
 - [x] CI build + signed release pipeline
-- [x] **Userland / package manager** — tap the 🐧 tab to pick a distro (**Alpine
-      Linux** or **Ubuntu**, both sha256-pinned) and install a proot-mounted
-      rootfs on first use. Real `apk`/`apt`, `python`, `git`, `ssh`, `vim`.
-      Long-press the 🐧 tab to uninstall and pick again. proot ships as bundled
+- [x] **Userland / package manager** — choose **Set up Ubuntu** on first launch to
+      open the distro chooser (**Alpine Linux** or **Ubuntu**, both sha256-pinned).
+      After setup, use the **New tab** icon beside your sessions for another shell.
+      Real `apk`/`apt`, `python`, `git`, `ssh`, `vim`. Manage Linux from
+      **Settings → Linux & connections → Manage Linux**. proot ships as bundled
       native libs; see `Userland.kt` / `Bootstrap.kt` / `LinuxUi.kt` and
       `THIRD_PARTY.md`.
 - [x] **Text selection** — long-press to select a word, drag the handles to
       extend, floating Copy/Paste toolbar, tap elsewhere to deselect (built on
       terminal-view's own `TextSelectionCursorController`; see `TermView.kt`).
-- [x] **Twenty whole-app themes** — tap **Theme** or **Settings → Browse 20 themes**.
+- [x] **Twenty whole-app themes** — open **Settings → Appearance → Browse 20 themes**.
       Search and filter by dark, light, or OLED; selections persist across restarts.
       See [the shared catalog](themes/README.md).
 - [x] Session persistence across process death (best-effort scrollback replay; see `SessionStore.kt`)
-- [x] SSH connection workspace with saved custom host and tmux reconnect
+- [x] SSH connection workspace with saved custom host and tmux reconnect; open **Connect (+)** beside your sessions.
+- [x] **AI Copilot** is available from **Settings → AI Copilot → Open AI Copilot**.
 - [x] Bounded, recoverable provisioning with mandatory full-toolchain verification
 - [x] App-managed Ed25519 identity, public-key copy workflow, and secure private-key import
 - [x] Linux self-test/repair UI and automatic migration away from legacy Android `sh` tabs

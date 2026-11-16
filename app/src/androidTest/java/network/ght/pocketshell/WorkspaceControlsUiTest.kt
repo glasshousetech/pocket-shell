@@ -73,18 +73,19 @@ class WorkspaceControlsUiTest {
         val dir = File(ctx.filesDir, "screenshots").apply { mkdirs() }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                // Phone layout: the action row folds away, tabs stay.
-                assertNotNull(device.wait(Until.findObject(By.text("Connect")), 10000))
+                // Phone layout: labels fold to numbered tabs; Settings and inline actions stay reachable.
+                assertNotNull(device.wait(Until.findObject(By.desc("Connect")), 10000))
                 device.findObject(By.desc("Collapse workspace menu")).click()
-                assertTrue(device.wait(Until.gone(By.text("Connect")), 4000))
+                assertTrue(device.wait(Until.hasObject(By.descStartsWith("Tab 1:")), 4000))
+                assertTrue(device.hasObject(By.desc("Settings")))
                 assertTrue(device.hasObject(By.desc("Session tabs")))
                 assertTrue(WorkspacePrefs.workspaceCollapsed(ctx))
                 device.waitForIdle(); device.takeScreenshot(File(dir, "workspace-collapsed-phone.png"))
                 activity.recreate()
                 assertTrue("Collapsed state survives recreation", device.wait(Until.hasObject(By.desc("Expand workspace menu")), 6000))
-                assertFalse(device.hasObject(By.text("Connect")))
+                assertTrue(device.hasObject(By.descStartsWith("Tab 1:")))
                 device.findObject(By.desc("Expand workspace menu")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("Connect")), 4000))
+                assertTrue(device.wait(Until.hasObject(By.desc("Connect")), 4000))
 
                 // Foldable inner-screen layout: the WORKSPACES sidebar collapses to a numbered rail.
                 device.executeShellCommand("wm size 1600x1800"); device.executeShellCommand("wm density 320")

@@ -66,9 +66,17 @@ class FilesWorkbench(private val context: Context, private val scope: CoroutineS
         scope.launch {
             try {
                 gate.withLock {
-                    DiagnosticLog.record(context, "files", event + "_started")
-                    body()
-                    DiagnosticLog.record(context, "files", event + "_finished")
+                    try {
+                        DiagnosticLog.record(context, "files", event + "_started")
+                        body()
+                        DiagnosticLog.record(context, "files", event + "_finished")
+                    } finally {
+                        // Finish durable receipt readback before enabling actions or starting
+                        // another operation, so an older snapshot cannot replace a newer one.
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            runCatching { TransferStore.load(context) }
+                        }.onSuccess { transfers = it }.onFailure { receiptError = "Transfer receipts could not be read; existing records were kept." }
+                    }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
               catch (failure: Exception) {
@@ -79,9 +87,6 @@ class FilesWorkbench(private val context: Context, private val scope: CoroutineS
                 DiagnosticLog.record(context, "files", event + "_failed", failure.javaClass.simpleName)
             } finally {
                 queued--; busy = queued > 0; if (!disposed) onActivityChanged()
-                withContext(NonCancellable + Dispatchers.IO) {
-                    runCatching { TransferStore.load(context) }
-                }.onSuccess { transfers = it }.onFailure { receiptError = "Transfer receipts could not be read; existing records were kept." }
             }
         }
     }

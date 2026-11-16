@@ -53,6 +53,74 @@ object ToolbarRobot {
         throw AssertionError("\"$label\" could not be tapped", last)
     }
 
+    /** Selects an off-screen session through its own scroll rail, including compact phone tabs. */
+    fun selectTab(device: UiDevice, label: String, timeoutMs: Long = 15000) {
+        check(workspaceReady(device, timeoutMs)) { "The terminal workspace did not load" }
+        val compact = By.desc(java.util.regex.Pattern.compile("Tab [0-9]+: " + java.util.regex.Pattern.quote(label)))
+        fun candidate(): UiObject2? = fresh {
+            val rail = device.findObject(By.desc("Session tabs")) ?: return@fresh null
+            var node = rail.findObject(By.text(label)) ?: rail.findObject(compact) ?: return@fresh null
+            while (!node.isClickable) node = node.parent ?: return@fresh null
+            val bounds = node.visibleBounds
+            node.takeIf { bounds.width() > 0 && bounds.height() > 0 && rail.visibleBounds.contains(bounds) }
+        }
+        fun visibleLabels() = fresh {
+            device.findObject(By.desc("Session tabs"))?.findObjects(By.clazz("android.widget.TextView"))
+                ?.map { it.text to it.visibleBounds }
+        }
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        var towardEnd = true
+        while (SystemClock.uptimeMillis() < deadline) {
+            device.waitForIdle()
+            val firstBounds = fresh { candidate()?.visibleBounds }
+            if (firstBounds != null) {
+                SystemClock.sleep(100)
+                val current = fresh { candidate()?.let { it to it.visibleBounds } }
+                if (current != null && current.second == firstBounds) {
+                    try { current.first.click() }
+                    catch (_: androidx.test.uiautomator.StaleObjectException) { continue }
+                    device.waitForIdle()
+                    // Refresh on every read: API34 can otherwise retain the previous
+                    // tab's close/options nodes even after the terminal has switched.
+                    val selectedDeadline = SystemClock.uptimeMillis() + 5000
+                    while (SystemClock.uptimeMillis() < selectedDeadline) {
+                        val selected = fresh {
+                            val rail = device.findObject(By.desc("Session tabs"))
+                            rail?.findObject(compact)?.isSelected == true ||
+                                rail?.hasObject(By.desc("Close tab $label")) == true
+                        }
+                        if (selected) return
+                        SystemClock.sleep(20)
+                    }
+                    throw AssertionError("The tapped session did not become selected: $label")
+                }
+                continue
+            }
+            val viewport = fresh { device.findObject(By.desc("Session tabs"))?.visibleBounds }
+                ?: throw AssertionError("The session tab rail is missing")
+            // The sidebar uses left/right chevrons; the phone row uses up/down chevrons.
+            val vertical = fresh {
+                device.findObject(By.desc("Expand workspace menu"))?.hasObject(By.text("»")) == true ||
+                    device.findObject(By.desc("Collapse workspace menu"))?.hasObject(By.text("«")) == true
+            }
+            val before = visibleLabels()
+            if (vertical) {
+                val near = viewport.top + viewport.height() / 4
+                val far = viewport.bottom - viewport.height() / 4
+                device.swipe(viewport.centerX(), if (towardEnd) far else near,
+                    viewport.centerX(), if (towardEnd) near else far, 60)
+            } else {
+                val near = viewport.left + viewport.width() / 4
+                val far = viewport.right - viewport.width() / 4
+                device.swipe(if (towardEnd) far else near, viewport.centerY(),
+                    if (towardEnd) near else far, viewport.centerY(), 60)
+            }
+            device.waitForIdle()
+            if (before == visibleLabels()) towardEnd = !towardEnd
+        }
+        throw AssertionError("Session tab is unreachable by scrolling: $label")
+    }
+
     private fun keyLabels(device: UiDevice): List<String>? = runCatching {
         fresh { device.findObject(By.desc(ROW))?.findObjects(By.clazz("android.widget.TextView"))?.mapNotNull { it.text } }
     }.getOrNull()

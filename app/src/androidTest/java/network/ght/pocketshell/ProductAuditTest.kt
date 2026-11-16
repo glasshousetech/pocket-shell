@@ -63,8 +63,7 @@ class ProductAuditTest {
         val beta = fixture(service, "AUDIT BETA")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                assertTrue(device.wait(Until.hasObject(By.text("AUDIT BETA")), 10000))
-                device.findObject(By.text("AUDIT BETA")).click()
+                ToolbarRobot.selectTab(device, "AUDIT BETA")
                 device.waitForIdle()
                 activity.onActivity { assertSame(beta.session, terminal(it.window.decorView)!!.currentSession) }
                 shot("selected-beta-before")
@@ -142,8 +141,7 @@ class ProductAuditTest {
         val beta = fixture(service, "AUDIT BETA")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                assertTrue(device.wait(Until.hasObject(By.text("AUDIT BETA")), 10000))
-                device.findObject(By.text("AUDIT BETA")).click()
+                ToolbarRobot.selectTab(device, "AUDIT BETA")
                 instrumentation.runOnMainSync { service.reviewedTextDrafts[beta.id] = "SAFE_DRAFT" }
                 assertTrue(device.wait(Until.hasObject(By.desc("Close tab AUDIT BETA")), 5000))
                 device.findObject(By.desc("Close tab AUDIT BETA")).click()

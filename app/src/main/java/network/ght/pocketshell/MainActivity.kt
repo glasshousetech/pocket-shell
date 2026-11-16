@@ -19,6 +19,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -41,6 +42,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
@@ -54,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
@@ -413,7 +420,14 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
 
     if (settingsOpen) {
         SettingsDialog(
-            onThemes = { settingsOpen = false; themeOpen = true },
+            onThemes = {
+                DiagnosticLog.record(ctx, "workspace", "themes_opened_from_settings")
+                settingsOpen = false; themeOpen = true
+            },
+            onCopilot = {
+                DiagnosticLog.record(ctx, "workspace", "copilot_opened_from_settings")
+                settingsOpen = false; copilotOpen = true
+            },
             onLinux = { settingsOpen = false; linuxManageOpen = true },
             onKeys = { settingsOpen = false; keysDialogOpen = true },
             onConnections = { settingsOpen = false; connectionsOpen = true },
@@ -727,8 +741,6 @@ private fun PocketShellApp(service: TermService, keyImportMessage: String?, onIm
             onMenuOpened = { viewClient.hideKeyboard() },
             onAdd = { addLinux() },
             onConnect = { viewClient.hideKeyboard(); connectionsOpen = true },
-            onTheme = { themeOpen = true },
-            onCopilot = { copilotOpen = !copilotOpen },
             onSettings = { settingsOpen = true },
             collapsed = workspaceCollapsed,
             onToggleCollapsed = {
@@ -950,8 +962,6 @@ private fun TabRail(
     onMenuOpened: () -> Unit,
     onAdd: () -> Unit,
     onConnect: () -> Unit,
-    onTheme: () -> Unit,
-    onCopilot: () -> Unit,
     onSettings: () -> Unit,
     collapsed: Boolean = false,
     onToggleCollapsed: () -> Unit = {},
@@ -1061,9 +1071,11 @@ private fun TabRail(
         if (sidebar && collapsed) {
             collapseToggle(Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), "»")
             Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) { compactTabs() }
+                verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                compactTabs()
+                SessionActions(onConnect, onAdd, vertical = true)
+            }
             Column(Modifier.fillMaxWidth().padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                RailAction("+",onAdd,Modifier.fillMaxWidth().semantics { contentDescription = "New tab" })
                 RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
             }
         } else if (sidebar) {
@@ -1071,27 +1083,57 @@ private fun TabRail(
                 Text("WORKSPACES", color = RailDimText, fontSize = 11.sp, modifier = Modifier.weight(1f))
                 collapseToggle(Modifier, "«")
             }
-            Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { tabs() }
+            Column(Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Session tabs" }.verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                tabs()
+                SessionActions(onConnect, onAdd)
+            }
             Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                RailAction("Connect",onConnect,Modifier.fillMaxWidth())
-                RailAction("New tab",onAdd,Modifier.fillMaxWidth())
-                RailAction("AI",onCopilot,Modifier.fillMaxWidth())
-                RailAction("Theme",onTheme,Modifier.fillMaxWidth())
                 RailAction("⚙",onSettings,Modifier.fillMaxWidth().semantics { contentDescription = "Settings" })
             }
         } else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).semantics { contentDescription = "Session tabs" }.horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,0.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp)) { tabs() }
+                Row(Modifier.weight(1f).semantics { contentDescription = "Session tabs" }.horizontalScroll(rememberScrollState()).padding(6.dp,6.dp,0.dp,3.dp),horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (collapsed) compactTabs() else tabs()
+                    SessionActions(onConnect, onAdd)
+                }
+                RailAction("⚙",onSettings,Modifier.width(48.dp).semantics { contentDescription = "Settings" })
                 collapseToggle(Modifier, if (collapsed) "▾" else "▴")
             }
-            // Collapsed on a phone: the tab row stays, the action row folds away for terminal space.
-            if (!collapsed) Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp,vertical = 4.dp),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                RailAction("Connect",onConnect,Modifier.weight(1.3f))
-                RailAction("New tab",onAdd,Modifier.weight(1.2f))
-                RailAction("AI",onCopilot,Modifier.weight(.75f))
-                RailAction("Theme",onTheme,Modifier.weight(1f))
-                RailAction("⚙",onSettings,Modifier.width(48.dp).semantics { contentDescription = "Settings" })
-            }
+        }
+    }
+}
+
+/** Session creation belongs to the session list, so it scrolls with its final entry. */
+@Composable
+private fun SessionActions(onConnect: () -> Unit, onAdd: () -> Unit, vertical: Boolean = false) {
+    val actions: @Composable () -> Unit = {
+        SessionActionIcon("Connect", onConnect, outlinedTab = false)
+        SessionActionIcon("New tab", onAdd, outlinedTab = true)
+    }
+    if (vertical) Column { actions() } else Row { actions() }
+}
+
+@Composable
+private fun SessionActionIcon(label: String, onClick: () -> Unit, outlinedTab: Boolean) {
+    val tone = RailDimText
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Box(
+        Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))
+            .semantics { contentDescription = label }
+            .clickable(role = Role.Button, onClickLabel = label) {
+                DiagnosticLog.record(context, "workspace", if (outlinedTab) "new_tab_requested" else "connections_opened")
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(20.dp)) {
+            val stroke = 1.5.dp.toPx()
+            if (outlinedTab) drawRoundRect(tone, Offset(stroke, stroke),
+                Size(size.width - 2 * stroke, size.height - 2 * stroke),
+                CornerRadius(2.dp.toPx()), style = Stroke(stroke))
+            val reach = size.width * if (outlinedTab) 0.19f else 0.34f
+            drawLine(tone, Offset(center.x - reach, center.y), Offset(center.x + reach, center.y), stroke, StrokeCap.Round)
+            drawLine(tone, Offset(center.x, center.y - reach), Offset(center.x, center.y + reach), stroke, StrokeCap.Round)
         }
     }
 }
