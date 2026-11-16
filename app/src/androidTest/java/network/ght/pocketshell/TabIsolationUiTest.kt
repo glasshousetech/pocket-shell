@@ -48,18 +48,20 @@ class TabIsolationUiTest {
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                val ready = device.wait(Until.hasObject(By.text("Tab Alpha")),8000)
+                val ready = ToolbarRobot.workspaceReady(device, 8000)
                 device.takeScreenshot(File(shots,"tabs-start.png"))
                 device.dumpWindowHierarchy(File(shots,"tabs-start.xml"))
-                assertTrue("Initial tab labels visible", ready)
+                assertTrue("Initial terminal workspace is ready", ready)
                 Thread.sleep(400)
                 write(a,"PS1='alpha> '; clear; export TAB_VALUE=ALPHA; printf 'TAB_%s_INDEPENDENT\\n' \"\$TAB_VALUE\"\n")
                 write(b,"PS1='beta> '; clear; export TAB_VALUE=BETA; printf 'TAB_%s_INDEPENDENT\\n' \"\$TAB_VALUE\"\n")
                 waitOutput(a,"TAB_ALPHA_INDEPENDENT"); waitOutput(b,"TAB_BETA_INDEPENDENT")
-                device.findObject(By.text("Tab Beta")).click(); device.waitForIdle()
+                ToolbarRobot.selectTab(device, "Tab Beta"); device.waitForIdle()
+                inst.runOnMainSync { assertEquals(b.id, service.selectedSessionId.value) }
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken,0) }
                 device.waitForIdle(); device.takeScreenshot(File(shots,"tabs-beta-portrait.png"))
-                device.findObject(By.text("Tab Alpha")).click()
+                ToolbarRobot.selectTab(device, "Tab Alpha")
+                inst.runOnMainSync { assertEquals(a.id, service.selectedSessionId.value) }
                 write(a,"exit 23\n")
                 assertTrue(device.wait(Until.hasObject(By.text("Reconnect this tab")),8000))
                 device.waitForIdle(); device.takeScreenshot(File(shots,"tabs-reconnect-portrait.png"))
@@ -76,15 +78,14 @@ class TabIsolationUiTest {
                 write(a,"printf 'RECONNECTED_%s_END\\n' \"\$GHT_TAB_ID\"\n")
                 waitOutput(a,"RECONNECTED_"+id+"_END")
                 activity.recreate()
-                assertTrue(device.wait(Until.hasObject(By.text("Tab Beta")),8000))
-                device.findObject(By.text("Tab Beta")).click()
+                ToolbarRobot.selectTab(device, "Tab Beta")
                 write(b,"printf 'STILL_%s_END\\n' \"\$TAB_VALUE\"\n")
                 waitOutput(b,"STILL_BETA_END")
                 activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken,0) }
                 device.setOrientationLeft(); Thread.sleep(700); device.waitForIdle()
                 device.takeScreenshot(File(shots,"tabs-beta-landscape.png"))
                 device.setOrientationNatural(); Thread.sleep(700); device.waitForIdle()
-                device.wait(Until.findObject(By.text("Tab Alpha")),5000)!!.click()
+                ToolbarRobot.selectTab(device, "Tab Alpha")
                 val close = device.wait(Until.findObject(By.desc("Close tab Tab Alpha")),5000)
                 device.takeScreenshot(File(shots,"tabs-before-close.png"))
                 device.dumpWindowHierarchy(File(shots,"tabs-before-close.xml"))

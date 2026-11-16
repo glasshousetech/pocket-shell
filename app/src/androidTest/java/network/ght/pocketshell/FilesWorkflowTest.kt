@@ -151,6 +151,7 @@ class FilesWorkflowTest {
                 main { files.upload(inputUri) }
                 ready(files)
                 val conflict = main { files.transfers.first() }
+                assertNotEquals("The second upload must expose its own current receipt", firstIdentity, conflict.id)
                 assertEquals(FileTransfer.Phase.CONFLICT, conflict.phase)
                 scrollTo("Replace and keep backup").click()
                 text("Replace this file?")
