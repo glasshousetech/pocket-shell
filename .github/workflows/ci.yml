@@ -77,12 +77,18 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          suffix=$(sed -n 's/.*versionNameSuffix = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          test -n "$version" && test -n "$suffix"
+          mkdir -p release-artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk "release-artifacts/pocketshell-${version}${suffix}.apk"
+          echo "POCKET_DEBUG_VERSION=${version}${suffix}" >> "$GITHUB_ENV"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: pocketshell-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: pocketshell-${{ env.POCKET_DEBUG_VERSION }}-debug-apk
+          path: release-artifacts/pocketshell-${{ env.POCKET_DEBUG_VERSION }}.apk
           if-no-files-found: error
 
       - name: Upload lint and unit-test evidence
@@ -98,7 +104,7 @@ jobs:
 
   instrumented-test:
     env:
-      POCKET_TEST_CLASSES: ${{ inputs.test_classes || 'network.ght.pocketshell.LinuxDnsTest,network.ght.pocketshell.CommandEditorTest,network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalOutputDrainTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest,network.ght.pocketshell.FilesWorkflowTest,network.ght.pocketshell.JobsWorkflowTest,network.ght.pocketshell.GuestGroupNamesAndroidTest,network.ght.pocketshell.WorkspaceControlsUiTest,network.ght.pocketshell.WorkspaceLayoutUiTest' }}
+      POCKET_TEST_CLASSES: ${{ inputs.test_classes || 'network.ght.pocketshell.LinuxDnsTest,network.ght.pocketshell.CommandEditorTest,network.ght.pocketshell.InputPerformanceTest,network.ght.pocketshell.TerminalSmokeTest,network.ght.pocketshell.TerminalOutputDrainTest,network.ght.pocketshell.TerminalInteractionTest,network.ght.pocketshell.StorageRegressionTest,network.ght.pocketshell.TerminalWorkspaceUiTest,network.ght.pocketshell.ThemeWorkspaceUiTest,network.ght.pocketshell.ConnectionLibraryTest,network.ght.pocketshell.TabIsolationTest,network.ght.pocketshell.TabIsolationUiTest,network.ght.pocketshell.TabMenuUiTest,network.ght.pocketshell.ProductAuditTest,network.ght.pocketshell.ReviewedCommandTest,network.ght.pocketshell.CopilotLifecycleTest,network.ght.pocketshell.WorkspacePreferencesUiTest,network.ght.pocketshell.NativeLayoutReviewTest,network.ght.pocketshell.WorkbenchUiTest,network.ght.pocketshell.RemoteWorkspacePersistenceTest,network.ght.pocketshell.RemoteWorkspaceUiTest,network.ght.pocketshell.FilesWorkflowTest,network.ght.pocketshell.JobsWorkflowTest,network.ght.pocketshell.GuestGroupNamesAndroidTest,network.ght.pocketshell.WorkspaceControlsUiTest,network.ght.pocketshell.WorkspaceLayoutUiTest,network.ght.pocketshell.SessionActionsUiTest' }}
     if: github.event_name != 'workflow_dispatch' || inputs.render_demo_run == ''
     # Real behavioral gate: spawns an actual TermService + shell on a booted
     # emulator and asserts a command's output round-trips. This is the check
@@ -148,7 +154,7 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu software -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           script: |
             ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
             adb install -r app/build/outputs/apk/debug/app-debug.apk
@@ -244,7 +250,7 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu software -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           script: |
             # Not using `gradlew connectedDebugAndroidTest` here: AGP's task
             # uninstalls both APKs the instant the test run finishes, which
@@ -324,7 +330,7 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu software -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           script: bash scripts/demo/${{ inputs.demo_suite == 'workflows' && 'record-all.sh' || 'record.sh' }}
       - name: Stop native demo fixture
         if: always()

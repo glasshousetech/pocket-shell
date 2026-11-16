@@ -142,6 +142,7 @@ private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modi
 @Composable
 fun SettingsDialog(
     onThemes: () -> Unit,
+    onCopilot: () -> Unit,
     onLinux: () -> Unit = {},
     onKeys: () -> Unit = {},
     onConnections: () -> Unit = {},
@@ -280,6 +281,7 @@ fun SettingsDialog(
             }
             if (section == "AI Copilot") {
             Text("AI Copilot", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            TextButton(onClick = onCopilot) { Text("Open AI Copilot") }
             Text(
                 "Bring your own Anthropic API key. Free to use — you pay Anthropic directly, nothing goes through Pocket Shell.",
                 color = RailDimText, fontFamily = RailMono, fontSize = 11.sp, lineHeight = 16.sp,

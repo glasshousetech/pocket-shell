@@ -62,8 +62,8 @@ class ConnectionLibraryTest {
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                assertTrue(device.wait(Until.hasObject(By.text("Connect")),8000))
-                device.findObject(By.text("Connect")).click()
+                assertTrue(device.wait(Until.hasObject(By.desc("Connect")),8000))
+                device.findObject(By.desc("Connect")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Add connection")),8000))
                 device.findObject(By.text("Add connection")).click()
                 assertTrue(device.wait(Until.hasObject(By.text("Connection details")),5000))

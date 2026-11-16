@@ -48,7 +48,7 @@ class ThemeWorkspaceUiTest {
         }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
-                assertTrue(device.wait(Until.hasObject(By.text("Theme")), 8000))
+                assertTrue(device.wait(Until.hasObject(By.desc("Settings")), 8000))
                 fun hideKeyboard() {
                     activity.onActivity { (it.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(it.window.decorView.windowToken, 0) }
                     device.waitForIdle()
@@ -79,7 +79,9 @@ class ThemeWorkspaceUiTest {
                 }
                 fun openThemes() {
                     hideKeyboard()
-                    device.findObject(By.text("Theme")).click()
+                    device.findObject(By.desc("Settings")).click()
+                    device.wait(Until.findObject(By.text("Appearance")), 5000)!!.click()
+                    device.wait(Until.findObject(By.text("Browse 20 themes")), 5000)!!.click()
                     assertTrue(device.wait(Until.hasObject(By.text("Find a theme")), 5000))
                 }
                 hideKeyboard()
@@ -129,7 +131,7 @@ class ThemeWorkspaceUiTest {
                 }
                 val last = TermThemes.ALL.last()
                 activity.recreate()
-                assertTrue(device.wait(Until.hasObject(By.text("Theme")), 5000))
+                assertTrue(device.wait(Until.hasObject(By.desc("Settings")), 5000))
                 assertEquals(last.id, TermThemes.saved(ctx).id)
                 activity.onActivity {
                     assertSame(fixtures.first().session, terminal(it.window.decorView)!!.currentSession)
@@ -165,7 +167,7 @@ class ThemeWorkspaceUiTest {
                 device.setOrientationNatural()
                 device.executeShellCommand("wm size 1600x1800")
                 device.executeShellCommand("wm density 320")
-                assertTrue(device.wait(Until.hasObject(By.text("Theme")), 5000))
+                assertTrue(device.wait(Until.hasObject(By.desc("Settings")), 5000))
                 openThemes()
                 capture("picker-fold-800")
                 device.findObject(By.text("Close")).click()
