@@ -1,6 +1,7 @@
 package network.ght.pocketshell
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -77,12 +78,28 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    private companion object { const val INSTALL_PERMISSION = 43 }
     private val serviceState = mutableStateOf<TermService?>(null)
     private val sshKeyPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) serviceState.value?.importSshKey(uri)
     }
 
+    /** True while the app is only stepping aside for a picker or settings screen it opened itself. */
+    private var systemFlow = false
+
+    /** One-time "Install unknown apps" screen, opened from the in-app update prompt or Settings. */
+    fun openInstallPermission() {
+        systemFlow = true
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(AppUpdater.permissionSettings(this), INSTALL_PERMISSION)
+        } catch (_: ActivityNotFoundException) {
+            systemFlow = false
+        }
+    }
+
     fun pickSshPrivateKey() {
+        systemFlow = true
         if (serviceState.value?.keyImportMessage?.value == "Validating SSH key…") return
         serviceState.value?.keyImportMessage?.value = null
         sshKeyPicker.launch(arrayOf("application/octet-stream", "text/plain", "*/*"))
@@ -133,6 +150,7 @@ class MainActivity : ComponentActivity() {
                         service, service.keyImportMessage.value, ::pickSshPrivateKey,
                         onThemeChanged = { currentTheme = it },
                     )
+                    UpdatePrompts()
                 }
             }
         }
@@ -143,6 +161,25 @@ class MainActivity : ComponentActivity() {
             serviceState.value?.openWorkbench(WorkbenchState.Page.JOBS)
             intent.action = null
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppUpdater.activityStarted(this)
+        UpdateCoordinator.start(this)
+    }
+
+    override fun onStop() {
+        UpdateCoordinator.stop()
+        AppUpdater.activityStopped(this, systemFlow)
+        super.onStop()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == INSTALL_PERMISSION && AppUpdater.canInstall(this)) UpdateCoordinator.installNow(this)
     }
 
     override fun onResume() {

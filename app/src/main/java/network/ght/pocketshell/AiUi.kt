@@ -124,7 +124,7 @@ fun CopilotPanel(
 }
 
 @Composable
-private fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, accent: Boolean = false, enabled: Boolean = true) {
+internal fun AiChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, accent: Boolean = false, enabled: Boolean = true) {
     Box(
         modifier = modifier
             .heightIn(min = 48.dp)
@@ -165,7 +165,6 @@ fun SettingsDialog(
     val scope = rememberCoroutineScope()
     var transcriptLogging by remember { mutableStateOf(Secrets.transcriptLoggingEnabled(ctx)) }
     var lastCrash by remember { mutableStateOf(CrashHandler.lastCrash(ctx)) }
-    var updateState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
     var storageGranted by remember { mutableStateOf(StorageAccess.isGranted(ctx)) }
     var fontPoints by remember { mutableIntStateOf(WorkspacePrefs.fontSize(ctx)) }
     var sidebarWidth by remember { mutableIntStateOf(WorkspacePrefs.sidebarWidth(ctx)) }
@@ -180,17 +179,6 @@ fun SettingsDialog(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    fun checkForUpdates() {
-        updateState = UpdateCheckState.Checking
-        scope.launch {
-            val result = withContext(Dispatchers.IO) { UpdateChecker.check(BuildConfig.VERSION_NAME) }
-            updateState = result.fold(
-                onSuccess = { if (it.isUpdateAvailable) UpdateCheckState.Available(it.latestVersion) else UpdateCheckState.UpToDate },
-                onFailure = { UpdateCheckState.Error },
-            )
-        }
     }
 
     val maxHeight = with(LocalConfiguration.current) { (screenHeightDp * 0.85f).dp }
@@ -388,28 +376,7 @@ fun SettingsDialog(
 
             }
             if (section == "Updates") {
-            Text("Updates", color = RailPromptText, fontFamily = RailMono, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Text(
-                "Pocket Shell v${BuildConfig.VERSION_NAME}",
-                color = RailDimText, fontFamily = RailMono, fontSize = 11.sp,
-            )
-            when (val s = updateState) {
-                is UpdateCheckState.Idle -> AiChip("Check for updates", { checkForUpdates() }, Modifier.fillMaxWidth())
-                is UpdateCheckState.Checking -> Text("Checking…", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
-                is UpdateCheckState.UpToDate -> Text("You're up to date.", color = RailAccentDim, fontFamily = RailMono, fontSize = 11.sp)
-                is UpdateCheckState.Error -> Column {
-                    Text("Couldn't check for updates. Your installed version is unchanged.", color = RailError, fontSize = 12.sp)
-                    TextButton(onClick = { checkForUpdates() }) { Text("Retry update check") }
-                }
-                is UpdateCheckState.Available -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("v${s.latestVersion} is available.", color = RailAccent, fontFamily = RailMono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    AiChip("Download v${s.latestVersion}", {
-                        ctx.startActivity(
-                            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(UpdateChecker.DOWNLOAD_URL)),
-                        )
-                    }, Modifier.fillMaxWidth(), accent = true)
-                }
-            }
+            UpdatesSection()
 
             }
             if (section == "Diagnostics") {
@@ -456,14 +423,6 @@ fun SettingsDialog(
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Close settings") }
         }
     }
-}
-
-private sealed interface UpdateCheckState {
-    data object Idle : UpdateCheckState
-    data object Checking : UpdateCheckState
-    data object UpToDate : UpdateCheckState
-    data object Error : UpdateCheckState
-    data class Available(val latestVersion: String) : UpdateCheckState
 }
 
 @Composable
