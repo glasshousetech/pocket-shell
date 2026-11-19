@@ -1,5 +1,7 @@
 # Normal keyboard input — rc.9 repair
 
+> **0.7.2 (2026-11-19):** SwiftKey still capitalized words on space (`claude` → `Claude`) despite caps=0. The keyboard bridge now refuses case changes to typed letters. See [keyboard-case-20261119.md](keyboard-case-20261119.md).
+
 ## Accepted behavior, 2026-11-08
 Connor explicitly requested no app-forced incognito keyboard, for existing users and everyone installing the app. Terminal and Text / voice use ordinary text input, including when the obsolete full_ime_features preference is absent, false or true. There is no private-keyboard toggle. Credential fields remain credential fields.
 
