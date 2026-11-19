@@ -60,7 +60,9 @@ jobs:
       - name: Build signed APK + AAB
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          # Google Play bundle: Play delivers updates, so -PghtPlay drops the in-app self-install permissions.
+          ./gradlew :app:bundleRelease -PghtPlay --no-daemon --stacktrace
 
       - name: Give release downloads their real version
         run: |
