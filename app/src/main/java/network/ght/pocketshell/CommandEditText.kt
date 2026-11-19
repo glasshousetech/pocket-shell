@@ -3,6 +3,7 @@ package network.ght.pocketshell
 import android.content.Context
 import android.text.InputType
 import android.view.Gravity
+import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
@@ -36,6 +37,28 @@ class CommandEditText(context: Context) : EditText(context) {
         DiagnosticLog.record(context, "input", "literal_editor_connection")
         return object : InputConnectionWrapper(original, false) {
             override fun getCursorCapsMode(reqModes: Int): Int = 0
+            // SwiftKey still re-capitalizes the word it is composing when it commits it.
+            override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean =
+                super.setComposingText(keepTypedCase(text), newCursorPosition)
+            override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean =
+                super.commitText(keepTypedCase(text), newCursorPosition)
         }
+    }
+
+    private var caseKeptLogged = false
+
+    /** A keyboard replacing its composing word may not change the case of letters already typed. */
+    private fun keepTypedCase(text: CharSequence): CharSequence {
+        val content = editableText ?: return text
+        val a = BaseInputConnection.getComposingSpanStart(content)
+        val b = BaseInputConnection.getComposingSpanEnd(content)
+        if (a < 0 || b < 0 || a == b) return text
+        val kept = TypedCase.keep(content.subSequence(minOf(a, b), maxOf(a, b)), text)
+        if (kept.contentEquals(text)) return text
+        if (!caseKeptLogged) {
+            caseKeptLogged = true
+            DiagnosticLog.record(context, "input", "keyboard_case_kept")
+        }
+        return kept
     }
 }

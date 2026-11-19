@@ -56,6 +56,31 @@ class CommandEditorTest {
         }
     }
 
+    @Test fun keyboardCannotRecapitalizeTheWordItCommits() {
+        instrumentation.runOnMainSync {
+            val editor = CommandEditText(instrumentation.targetContext)
+            editor.setText("")
+            val connection = editor.onCreateInputConnection(EditorInfo())!!
+            // SwiftKey on space: the composed word comes back capitalized.
+            assertTrue(connection.setComposingText("l", 1))
+            assertTrue(connection.setComposingText("ls", 1))
+            assertTrue(connection.commitText("Ls ", 1))
+            assertEquals("ls ", editor.text.toString())
+            assertTrue(connection.setComposingText("github", 1))
+            assertTrue(connection.setComposingText("GitHub", 1))
+            assertEquals("ls github", editor.text.toString())
+            assertTrue(connection.finishComposingText())
+            // Replacing a selection (no composing word) is the user's own edit and keeps its case.
+            assertTrue(connection.setSelection(0, 2))
+            assertTrue(connection.commitText("LS", 1))
+            assertEquals("LS github", editor.text.toString())
+            connection.closeConnection()
+        }
+        val logs = DiagnosticLog.read(instrumentation.targetContext)
+        assertTrue(logs.contains("keyboard_case_kept"))
+        assertFalse(logs.contains("github"))
+    }
+
     @Test fun compositionCommitManualCaseUnicodeAndCursorEditingStayLiteral() {
         val expected = "echo 'MiXeD café 🚀'"
         instrumentation.runOnMainSync {

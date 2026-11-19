@@ -227,6 +227,32 @@ class TerminalInteractionTest {
         waitFor(session, "6c 73")
     }
 
+    @Test fun keyboardCannotRecapitalizeWordsAlreadyInTheShell() = terminal(receiver(9)) { view, _, session ->
+        instrumentation.runOnMainSync {
+            val input = view.onCreateInputConnection(EditorInfo())
+            // SwiftKey on space: the word it composed comes back capitalized ("ls" -> "Ls ").
+            assertTrue(input.setComposingText("l", 1))
+            assertTrue(input.setComposingText("ls", 1))
+            assertTrue(input.commitText("Ls ", 1))
+            assertEquals("", editorText(input))
+            // The same correction made as a batch: re-cased composition, commit, then the space.
+            input.beginBatchEdit()
+            input.setComposingText("git", 1)
+            input.endBatchEdit()
+            input.beginBatchEdit()
+            input.setComposingText("Git", 1)
+            input.commitText("Git", 1)
+            input.commitText(" ", 1)
+            input.endBatchEdit()
+            // A capital the user typed is theirs and goes through untouched.
+            assertTrue(input.setComposingText("H", 1))
+            assertTrue(input.setComposingText("Hi", 1))
+            assertTrue(input.commitText("Hi", 1))
+        }
+        // "ls git Hi" with no DEL (7f) and no re-sent capital anywhere.
+        waitFor(session, "6c 73 20 67 69 74 20 48 69")
+    }
+
     @Test fun tabMidWordSendsTheWordFirstAndStartsAFreshKeyboardWord() = terminal(receiver(4)) { view, client, session ->
         instrumentation.runOnMainSync {
             val input = view.onCreateInputConnection(EditorInfo())
