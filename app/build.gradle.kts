@@ -22,8 +22,8 @@ android {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 35
-        versionName = "0.7.1"
+        versionCode = 36
+        versionName = "0.7.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
         externalNativeBuild {

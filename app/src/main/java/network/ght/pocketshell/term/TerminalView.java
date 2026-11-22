@@ -40,6 +40,8 @@ import com.termux.terminal.KeyHandler;
 import com.termux.terminal.TerminalEmulator;
 import com.termux.terminal.TerminalSession;
 import network.ght.pocketshell.term.textselection.TextSelectionCursorController;
+import network.ght.pocketshell.DiagnosticLog;
+import network.ght.pocketshell.TypedCase;
 
 /**
  * View displaying and interacting with a {@link TerminalSession}.
@@ -309,8 +311,9 @@ public class TerminalView extends View {
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         // Commands are normal text: keep voice/clipboard available without requesting
-        // incognito mode. A single-line IME contract prevents SwiftKey's automatic
-        // first-letter capitalization; action keys are handled explicitly below.
+        // incognito mode. A single-line IME contract with no CAP_* flag stops SwiftKey's
+        // automatic shift on the first letter; ImeConnection.sync() also refuses the case
+        // change SwiftKey still makes when it commits a word. Action keys are handled below.
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
             | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_ENTER_ACTION;
@@ -350,6 +353,8 @@ public class TerminalView extends View {
         private final int inputGeneration;
         private int batchDepth;
         private boolean selectionUpdatePosted;
+        /** One content-free diagnostic per connection when the keyboard tried to re-case a word. */
+        private boolean caseKeptLogged;
 
         ImeConnection(TerminalSession session, int generation) {
             super(TerminalView.this, true);
@@ -400,8 +405,14 @@ public class TerminalView extends View {
          */
         boolean sync() {
             if (!isCurrent() || mEmulator == null) return false;
-            String current = getEditable().toString();
             String sent = mImeMirror;
+            // SwiftKey commits its dictionary spelling on space (claude -> "Claude "), whatever the
+            // EditorInfo asks for. Letters already in the shell keep the case they were typed in.
+            String current = TypedCase.keep(sent, getEditable());
+            if (!caseKeptLogged && !current.contentEquals(getEditable())) {
+                caseKeptLogged = true;
+                DiagnosticLog.INSTANCE.record(getContext(), "input", "keyboard_case_kept", null, null, null);
+            }
             if (current.equals(sent)) return true;
             int prefix = 0;
             int limit = Math.min(current.length(), sent.length());
