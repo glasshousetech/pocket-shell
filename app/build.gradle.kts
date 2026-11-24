@@ -24,6 +24,8 @@ android {
         targetSdk = 34
         versionCode = 36
         versionName = "0.7.2"
+        // Direct (dl.ght.network) builds update themselves in-app; Google Play builds pass -PghtPlay and leave updates to Play.
+        buildConfigField("boolean", "DIRECT_UPDATES", if (project.hasProperty("ghtPlay")) "false" else "true")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
         externalNativeBuild {
@@ -73,6 +75,11 @@ android {
         }
     }
 
+    // -PghtPlay: Play delivers updates, so the self-install permissions are removed from the release manifest.
+    if (project.hasProperty("ghtPlay")) {
+        sourceSets.getByName("release").manifest.srcFile("src/playStore/AndroidManifest.xml")
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         // proot + loaders are shipped as lib*.so but must be extracted to the
@@ -91,6 +98,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // Hourly background update check and install-on-leave job.
+    implementation("androidx.work:work-runtime:2.9.1")
+
     // Extract the Alpine rootfs tarball (tar) with symlink/mode fidelity.
     implementation("org.apache.commons:commons-compress:1.26.2")
 
@@ -103,6 +113,7 @@ dependencies {
     implementation("androidx.annotation:annotation:1.8.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

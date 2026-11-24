@@ -268,6 +268,7 @@ class TermService : Service() {
         // onCreate only runs once per process instance — a warm re-bind from a
         // recreated Activity reuses the live service and never gets here, so
         // "sessions is empty in onCreate" reliably means a fresh process.
+        live = this
         restoreFromSnapshot()
         jobs // Recover watches and verified results on every cold service start.
         snapshotHandler.postDelayed(snapshotTask, SNAPSHOT_INTERVAL_MS)
@@ -706,6 +707,7 @@ class TermService : Service() {
     }
 
     override fun onDestroy() {
+        if (live === this) live = null
         if (jobsState.isInitialized()) jobs.close()
         if (filesState.isInitialized()) files.close()
         operations.cancel()
@@ -720,6 +722,19 @@ class TermService : Service() {
     }
 
     companion object {
+        @Volatile private var live: TermService? = null
+
+        /**
+         * True while a terminal session (SSH or local) is running or a file transfer is in flight. The in-app
+         * updater never restarts the app then, because the install would end the sessions.
+         */
+        fun hasLiveWork(): Boolean {
+            val service = live ?: return false
+            return try {
+                service.sessions.toList().any { it.alive.value } || (service.filesState.isInitialized() && service.files.busy)
+            } catch (_: Exception) { true }
+        }
+
         private const val CHANNEL = "pocketshell_sessions"
         private const val NOTIF_ID = 1001
         const val ACTION_STOP = "network.ght.pocketshell.STOP"
