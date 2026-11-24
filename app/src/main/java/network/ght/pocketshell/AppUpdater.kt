@@ -9,10 +9,12 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
-import android.content.pm.SigningInfo
+import android.content.pm.PackageInfo
+import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -266,20 +268,26 @@ object AppUpdater {
     /** The APK must be this app, the advertised version, and signed by the same key as the installed copy. */
     private fun verify(c: Context, apk: File, r: UpdateRelease) {
         val pm = c.packageManager
-        val archive = pm.getPackageArchiveInfo(apk.path, PackageManager.GET_SIGNING_CERTIFICATES)
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+        val archive = pm.getPackageArchiveInfo(apk.path, flags)
             ?: throw IOException("Downloaded update is not a readable APK")
         if (c.packageName != archive.packageName) throw IOException("Downloaded update is for another app")
-        if (archive.longVersionCode != r.code.toLong()) throw IOException("Downloaded update has version ${archive.longVersionCode}, expected ${r.code}")
-        val installed = pm.getPackageInfo(c.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-        val mine = signers(installed.signingInfo)
-        val theirs = signers(archive.signingInfo)
+        val archiveCode = PackageInfoCompat.getLongVersionCode(archive)
+        if (archiveCode != r.code.toLong()) throw IOException("Downloaded update has version $archiveCode, expected ${r.code}")
+        val installed = pm.getPackageInfo(c.packageName, flags)
+        val mine = signers(installed)
+        val theirs = signers(archive)
         if (mine.isEmpty() || theirs.isEmpty()) throw IOException("Signing certificate could not be read")
         if (theirs.none { it in mine }) throw IOException("Downloaded update is signed by a different key")
     }
 
-    private fun signers(info: SigningInfo?): Set<String> {
-        if (info == null) return emptySet()
-        val sigs = (if (info.hasMultipleSigners()) info.apkContentsSigners else info.signingCertificateHistory) ?: return emptySet()
+    private fun signers(info: PackageInfo): Set<String> {
+        val sigs: Array<Signature> = if (Build.VERSION.SDK_INT >= 28) {
+            val si = info.signingInfo ?: return emptySet()
+            (if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory) ?: return emptySet()
+        } else {
+            @Suppress("DEPRECATION") info.signatures ?: return emptySet()
+        }
         val md = MessageDigest.getInstance("SHA-256")
         return sigs.map { hex(md.digest(it.toByteArray())) }.toSet()
     }
