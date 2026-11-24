@@ -1,0 +1,10 @@
+{
+  "proot": "b40accf05dfddbaf44758aa666ade79c57255005",
+  "builder": "01f83b8841358450c78333d1b33ab30d4943bec4",
+  "ndk": "27.2.12479018",
+  "api": 26,
+  "abi": "x86_64",
+  "patchSha256": "d852ccd0104e53a15122482a2e481d137a99f4ced5028aae415efa7cd90aad73",
+  "binarySha256": "8e23b7404ed573975b6aa9c2f28ffb9086b415ae2efc1635bfa640f3cb2c68f3",
+  "acceptance": "Build only; real Android app-context and upgrade tests are separate."
+}

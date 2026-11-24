@@ -41,11 +41,18 @@ object TermCore {
         context: Context,
         mode: SessionMode,
         cwd: String? = null,
+        startupCommand: String? = null,
+        tabId: String = TabIdentity.create(),
         onRedraw: (TerminalSession) -> Unit,
         onTitle: (TerminalSession) -> Unit,
         onFinished: (TerminalSession) -> Unit,
     ): TerminalSession {
-        val client = RailSessionClient(onRedraw, onTitle, onFinished)
+        TabIdentity.requireValid(tabId)
+        val client = RailSessionClient(onRedraw, onTitle, onFinished, context.applicationContext) {
+            android.widget.Toast.makeText(context.applicationContext,
+                "Input could not be queued. The session has ended or is not reading input. Your reviewed draft is kept.",
+                android.widget.Toast.LENGTH_LONG).show()
+        }
         // A dedicated subdir, not the raw files dir root — the latter also holds
         // session-store JSON, caches, and extracted native libs, which made `ls`
         // in a fresh SYSTEM shell look like broken app internals instead of an
@@ -58,13 +65,13 @@ object TermCore {
                 // defensively (should be unreachable — the UI only offers a
                 // LINUX session once Bootstrap.install has set a marker).
                 val distro = Userland.installedDistro(context) ?: Distro.Alpine
-                val args = Userland.prootArgs(context, distro)
+                val args = Userland.prootArgs(context, distro, startupCommand, tabId)
                 TerminalSession(
                     args[0],                    // proot binary
                     home,                       // host cwd
                     args,                       // full proot argv
                     Userland.prootEnv(context),
-                    4000,
+                    20000,
                     client,
                 )
             }
@@ -77,6 +84,7 @@ object TermCore {
                 // so dotfiles/history persist; xterm-256color unlocks color.
                 val env = arrayOf(
                     "TERM=xterm-256color",
+                    "GHT_TAB_ID=$tabId",
                     "HOME=$home",
                     "TMPDIR=$tmp",
                     "PATH=/system/bin:/system/xbin",
@@ -88,7 +96,7 @@ object TermCore {
                     startDir,
                     arrayOf(shell, "-i"),
                     env,
-                    4000,
+                    20000,
                     client,
                 )
             }
@@ -105,7 +113,11 @@ class RailSessionClient(
     private val onRedraw: (TerminalSession) -> Unit,
     private val onTitle: (TerminalSession) -> Unit,
     private val onFinished: (TerminalSession) -> Unit,
+    private val diagnosticsContext: Context? = null,
+    private val onInputRejected: () -> Unit = {},
 ) : TerminalSessionClient {
+
+    override fun onInputRejected(session: TerminalSession) = onInputRejected()
 
     override fun onTextChanged(session: TerminalSession) = onRedraw(session)
     override fun onTitleChanged(session: TerminalSession) = onTitle(session)
@@ -126,7 +138,20 @@ class RailSessionClient(
     override fun getTerminalCursorStyle(): Int? = null
 
     override fun logError(tag: String?, message: String?) { Log.e(tag ?: TAG, message ?: "") }
-    override fun logWarn(tag: String?, message: String?) { Log.w(tag ?: TAG, message ?: "") }
+    override fun logWarn(tag: String?, message: String?) {
+        Log.w(tag ?: TAG, message ?: "")
+        if (tag == "TerminalSession" && diagnosticsContext != null) {
+            val event = when {
+                message?.startsWith("Terminal output read failed:") == true -> "output_read_failed"
+                message?.startsWith("Terminal input write failed:") == true -> "input_write_failed"
+                message?.startsWith("Terminal exit signal") == true -> "exit_signal_failed"
+                message?.startsWith("Terminal close failed:") == true -> "close_failed"
+                else -> null
+            }
+            // Keep terminal content, commands and native exception text out of durable exports.
+            if (event != null) DiagnosticLog.record(diagnosticsContext, "terminal_io", event)
+        }
+    }
     override fun logInfo(tag: String?, message: String?) { Log.i(tag ?: TAG, message ?: "") }
     override fun logDebug(tag: String?, message: String?) { Log.d(tag ?: TAG, message ?: "") }
     override fun logVerbose(tag: String?, message: String?) { Log.v(tag ?: TAG, message ?: "") }

@@ -15,14 +15,22 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "network.ght.pocketshell"
     compileSdk = 34
+    ndkVersion = "27.2.12479018"
+    testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
 
     defaultConfig {
         applicationId = "network.ght.pocketshell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.4.0-rc.2"
+        versionCode = 36
+        versionName = "0.7.2"
+        // Direct (dl.ght.network) builds update themselves in-app; Google Play builds pass -PghtPlay and leave updates to Play.
+        buildConfigField("boolean", "DIRECT_UPDATES", if (project.hasProperty("ghtPlay")) "false" else "true")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
+        externalNativeBuild {
+            ndkBuild { cFlags += listOf("-std=c11", "-Wall", "-Wextra", "-Werror", "-Os") }
+        }
     }
 
     signingConfigs {
@@ -40,6 +48,8 @@ android {
         compose = true
         buildConfig = true
     }
+    externalNativeBuild { ndkBuild { path = file("src/main/jni/Android.mk") } }
+    testOptions { unitTests.isReturnDefaultValues = true }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
@@ -53,6 +63,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            versionNameSuffix = "-review.1"
+        }
         release {
             isMinifyEnabled = false
             // Sign with the release key when keystore.properties is present.
@@ -60,6 +73,11 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+
+    // -PghtPlay: Play delivers updates, so the self-install permissions are removed from the release manifest.
+    if (project.hasProperty("ghtPlay")) {
+        sourceSets.getByName("release").manifest.srcFile("src/playStore/AndroidManifest.xml")
     }
 
     packaging {
@@ -80,18 +98,22 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // Hourly background update check and install-on-leave job.
+    implementation("androidx.work:work-runtime:2.9.1")
+
     // Extract the Alpine rootfs tarball (tar) with symlink/mode fidelity.
     implementation("org.apache.commons:commons-compress:1.26.2")
 
     // Encrypted storage for the user's Anthropic API key (AI copilot, BYO-key).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Real terminal engine: native PTY + VT100/xterm emulator + Android view.
-    // Prebuilt .so for all ABIs ships in the AAR — no NDK needed. GPLv3.
-    // terminal-emulator is pulled in transitively.
-    implementation("com.termux.termux-app:terminal-view:0.118.0")
+    // Termux v0.118.0 engine + JNI are built from pinned, vendored source so the
+    // nonblocking input queue is shared by keyboard, paste and terminal replies.
+    // Provenance and local changes: third_party/termux/README.md.
+    implementation("androidx.annotation:annotation:1.8.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

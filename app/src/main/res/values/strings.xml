@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Pocket Shell</string>
+
+    <!-- Text-selection action mode, used by the vendored terminal view
+         (network.ght.pocketshell.term). Supplied by terminal-view's own res
+         before that module was vendored in. -->
+    <string name="copy_text">Copy</string>
+    <string name="paste_text">Paste</string>
+    <string name="text_selection_more">More…</string>
 </resources>

@@ -25,4 +25,14 @@ class UserlandAptSourcesTest {
             Userland.ubuntuAptSources("armeabi-v7a").lineSequence().first { it.startsWith("URIs:") },
         )
     }
+
+    @Test
+    fun `Ubuntu apt runs recover an interrupted dpkg first`() {
+        val prelude = Userland.ubuntuAptPrelude()
+
+        assertTrue(prelude.contains("DEBIAN_FRONTEND=noninteractive"))
+        assertTrue(prelude.contains("dpkg --configure -a"))
+        assertTrue(prelude.trimEnd().endsWith(";"))
+        assertTrue(Userland.ubuntuApt().startsWith("apt-get "))
+    }
 }

@@ -24,7 +24,7 @@ object AiCopilot {
         "You are a command-line copilot embedded in Pocket Shell, an Android terminal that runs either " +
             "the Android system shell (Toybox) or Alpine Linux via proot. The user tells you what they " +
             "want to do; reply with ONLY the shell command(s) that accomplish it. No explanation, no " +
-            "markdown, no backticks, no code fences. Chain steps with && or newlines. Prefer POSIX/busybox " +
+            "markdown, no backticks, no code fences. Return exactly one line without control characters; chain steps with &&. Prefer POSIX/busybox " +
             "compatible commands. If the request is unsafe or unclear, reply with a single line starting " +
             "with '# ' explaining why."
 

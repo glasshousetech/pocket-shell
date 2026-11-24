@@ -15,7 +15,7 @@ sealed class Distro(val id: String, val label: String, val dirName: String) {
     companion object {
         // Ubuntu is the daily-driver default: glibc and Debian packaging match
         // the supported environment expected by agent CLIs and most dev tools.
-        val ALL: List<Distro> = listOf(Ubuntu, Alpine)
+        val ALL: List<Distro> get() = listOf(Ubuntu, Alpine)
         fun byId(id: String): Distro? = ALL.firstOrNull { it.id == id }
     }
 }
@@ -96,6 +96,19 @@ object Userland {
     }
 
     /** First device ABI we have both a proot binary and a rootfs for, for this distro. */
+    /**
+     * Shell prelude for every Ubuntu apt run. A guest apt/dpkg that was killed
+     * mid-flight (timeout, app swipe, reboot) leaves dpkg interrupted, and apt
+     * then refuses to do anything until `dpkg --configure -a` has run. Repairing
+     * that state up front keeps install and repair idempotent.
+     */
+    fun ubuntuAptPrelude(): String =
+        "export DEBIAN_FRONTEND=noninteractive; dpkg --configure -a || true; "
+
+    /** Use only Pocket Shell's signed Ubuntu source, never an inherited stale source file. */
+    fun ubuntuApt(): String =
+        "apt-get -o Dir::Etc::sourcelist=\"sources.list.d/pocketshell.sources\" -o Dir::Etc::sourceparts=\"-\""
+
     fun supportedAbi(distro: Distro): String? = Build.SUPPORTED_ABIS.firstOrNull { rootfsMap(distro).containsKey(it) }
     fun rootfsFor(distro: Distro, abi: String): Rootfs? = rootfsMap(distro)[abi]
 
@@ -119,6 +132,7 @@ object Userland {
 
     /** Host-side env for the proot process itself. */
     fun prootEnv(context: Context): Array<String> {
+        LinuxDns.refresh(context)
         val tmp = File(context.cacheDir, "proot").apply { mkdirs() }
         val env = mutableListOf(
             "PROOT_LOADER=${loader(context).absolutePath}",
@@ -167,18 +181,37 @@ object Userland {
     }
 
     /** argv that boots an interactive login shell inside [distro]'s rootfs. */
-    fun prootArgs(context: Context, distro: Distro): Array<String> =
-        baseArgs(context, distro) + arrayOf(
-            if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh",
-            "-l",
-        )
+    fun prootArgs(context: Context, distro: Distro, startupCommand: String? = null, tabId: String = TabIdentity.create()): Array<String> {
+        TabIdentity.requireValid(tabId)
+        val shell = if (File(rootfsDir(context, distro), "bin/bash").canExecute()) "/bin/bash" else "/bin/sh"
+        return baseArgs(context, distro) + arrayOf("GHT_TAB_ID=$tabId") +
+            groupAwareArgs(context, interactiveShellArgs(shell, startupCommand))
+    }
+
+    internal fun interactiveShellArgs(shell: String, startupCommand: String?): Array<String> =
+        if (startupCommand == null) arrayOf(shell, "-l")
+        else arrayOf(shell, "-lc", startupCommand)
 
     /** argv that runs [command] non-interactively inside [distro]'s rootfs (no PTY; used for provisioning). */
     fun prootExecArgs(context: Context, distro: Distro, command: String): Array<String> =
-        baseArgs(context, distro) + arrayOf("/bin/sh", "-c", command)
+        baseArgs(context, distro) + groupAwareArgs(context, arrayOf("/bin/sh", "-c", command))
+
+    @Volatile private var groupStartupScript: String? = null
+
+    private fun groupAwareArgs(context: Context, command: Array<String>): Array<String> {
+        val script = groupStartupScript ?: synchronized(this) {
+            groupStartupScript ?: context.assets.open("pocketshell-group-map.sh")
+                .bufferedReader().use { it.readText() }.also { groupStartupScript = it }
+        }
+        return GuestGroupNames.wrap(command, script, BuildConfig.VERSION_CODE)
+    }
 
     /** Removes every installed distro's rootfs so the picker starts fresh. */
-    fun uninstall(context: Context) {
-        Distro.ALL.forEach { runCatching { rootfsDir(context, it).deleteRecursively() } }
-    }
+    fun uninstall(context: Context): Result<Unit> = runCatching {
+        synchronized(SshKeyStore.identityLock) {
+            DiagnosticLog.record(context, "linux", "removal_started")
+            Distro.ALL.forEach { check(rootfsDir(context, it).deleteRecursively()) { "Linux files remain." } }
+            DiagnosticLog.record(context, "linux", "removal_finished")
+        }
+    }.onFailure { DiagnosticLog.record(context, "linux", "removal_incomplete", it.javaClass.simpleName) }
 }
