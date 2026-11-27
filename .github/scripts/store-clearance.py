@@ -11,10 +11,36 @@ import glob
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+
+
+def credential_identity(store, environment):
+    """Read only public principal identifiers from the exact uploader credentials.
+
+    Credentials stay in the CI environment and never enter the clearance/output.
+    The operator separately proves this principal's store-account association.
+    """
+    if store=='google':
+        credential=json.loads(environment.get('GHT_UPLOAD_GOOGLE_JSON',''))
+        email=credential.get('client_email','')
+        if credential.get('type')!='service_account' or not re.fullmatch(r'[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com',email):
+            raise ValueError('Google uploader needs its actual service-account credential')
+        return 'google:'+email
+    if store=='apple':
+        issuer=environment.get('GHT_UPLOAD_APPLE_ISSUER','')
+        if not re.fullmatch(r'[0-9a-fA-F-]{36}',issuer):raise ValueError('Apple uploader needs its actual App Store Connect issuer')
+        return 'apple:'+issuer.lower()
+    if store=='microsoft':
+        credential=json.loads(environment.get('GHT_UPLOAD_MICROSOFT_JSON',''))
+        fields=[credential.get(key,'') for key in ('tenantId','clientId')]
+        if any(not re.fullmatch(r'[0-9a-fA-F-]{36}',value) for value in fields):
+            raise ValueError('Microsoft uploader needs tenantId and clientId from its actual credential')
+        return 'microsoft:'+':'.join(value.lower() for value in fields)
+    raise ValueError('unsupported store credential')
 
 
 def check(certificate, trust_file, artifact_pattern, source_sha, store, package_id, channel, repository, run_id, run_attempt, account, release_mode):
@@ -64,8 +90,11 @@ def main():
         certificate=os.environ.get("GHT_STORE_CLEARANCE_JSON","")
         if not certificate:
             raise ValueError("no controller-issued batch clearance; prepare evidence and obtain Connor's approval before uploading")
+        actual_account=credential_identity(args.store,os.environ)
+        if actual_account!=args.account:
+            raise ValueError('actual uploader credential principal differs from approved account scope')
         result=check(certificate,args.trust,args.artifact,args.source_sha,args.store,args.package_id,args.channel,
-                     os.environ.get("GITHUB_REPOSITORY",""),os.environ.get("GITHUB_RUN_ID",""),os.environ.get("GITHUB_RUN_ATTEMPT",""),args.account,args.release_mode)
+                     os.environ.get("GITHUB_REPOSITORY",""),os.environ.get("GITHUB_RUN_ID",""),os.environ.get("GITHUB_RUN_ATTEMPT",""),actual_account,args.release_mode)
         print(json.dumps({"state":"AUTHORIZED","candidate_sha256":result["candidate_sha256"],"batch_id":result["batch_id"]}))
         return 0
     except (ValueError,KeyError,OSError,TypeError) as exc:
