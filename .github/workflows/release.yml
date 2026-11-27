@@ -167,7 +167,7 @@ jobs:
           GATE_ARTIFACT: app/build/outputs/bundle/release/app-release.aab
           GATE_PACKAGE: network.ght.pocketshell
           GATE_CHANNEL: internal
-          GATE_ACCOUNT: ${{ vars.GHT_STORE_ACCOUNT }}
+          GATE_ACCOUNT: ${{ vars.GHT_STORE_ACCOUNT_GOOGLE }}
           GATE_RELEASE_MODE: automatic
           GATE_SOURCE_SHA: ${{ github.sha }}
         run: >-
